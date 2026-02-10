@@ -1,0 +1,88 @@
+name: Build and Deploy P2 Update Site
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build DAG builder
+        working-directory: dag-builder
+        run: |
+          npm ci
+          npm run build
+
+      - name: Bundle DAG builder into plugin
+        run: |
+          mkdir -p com.abap.doc.plugin/node
+          cp dag-builder/bundle/dag-builder.js com.abap.doc.plugin/node/
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Build Eclipse plugin with Maven Tycho
+        run: mvn clean verify -B
+
+      - name: Prepare P2 site for GitHub Pages
+        run: |
+          mkdir -p gh-pages
+          cp -r com.abap.doc.updatesite/target/repository/* gh-pages/
+          cat > gh-pages/index.html << 'HTMLEOF'
+          <!DOCTYPE html>
+          <html>
+          <head><title>ABAP Doc Generator - Eclipse Update Site</title></head>
+          <body>
+            <h1>ABAP Documentation Generator</h1>
+            <p>Eclipse P2 Update Site for the ABAP Documentation Generator plugin.</p>
+            <h2>Installation</h2>
+            <ol>
+              <li>In Eclipse, go to <b>Help > Install New Software...</b></li>
+              <li>Add this URL as a repository: <code>https://yahornovik.github.io/abap-doc-generator/</code></li>
+              <li>Select "ABAP Documentation Generator" and install</li>
+            </ol>
+            <h2>Prerequisites</h2>
+            <ul>
+              <li>Eclipse 2024-06 or newer</li>
+              <li>Node.js 20+ installed on your machine</li>
+            </ul>
+          </body>
+          </html>
+          HTMLEOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: gh-pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
