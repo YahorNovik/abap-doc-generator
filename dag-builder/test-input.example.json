@@ -1,0 +1,8 @@
+{
+  "systemUrl": "https://your-sap-host:44300",
+  "client": "100",
+  "username": "DEVELOPER",
+  "password": "your-password",
+  "objectName": "ZCL_YOUR_CLASS",
+  "objectType": "CLAS"
+}

@@ -1,0 +1,26 @@
+# Node
+dag-builder/node_modules/
+dag-builder/dist/
+dag-builder/bundle/
+dag-builder/test-input.json
+
+# Plugin bundled Node.js (built from dag-builder/)
+com.abap.doc.plugin/node/
+
+# Java/Eclipse
+*.class
+bin/
+target/
+.settings/
+.classpath
+.project
+.metadata/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

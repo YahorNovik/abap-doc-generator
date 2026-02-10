@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feature
+    id="com.abap.doc.feature"
+    label="ABAP Documentation Generator"
+    version="1.0.0.qualifier"
+    provider-name="ABAP Doc Generator">
+
+    <description>
+        Generates LLM-powered documentation for ABAP objects.
+    </description>
+
+    <plugin
+        id="com.abap.doc.plugin"
+        download-size="0"
+        install-size="0"
+        version="0.0.0"
+        unpack="false"/>
+
+</feature>

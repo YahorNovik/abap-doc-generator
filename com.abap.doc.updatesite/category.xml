@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<site>
+    <feature id="com.abap.doc.feature" version="0.0.0">
+        <category name="com.abap.doc"/>
+    </feature>
+    <category-def name="com.abap.doc" label="ABAP Documentation Generator">
+        <description>
+            LLM-powered documentation generator for ABAP objects.
+        </description>
+    </category-def>
+</site>
