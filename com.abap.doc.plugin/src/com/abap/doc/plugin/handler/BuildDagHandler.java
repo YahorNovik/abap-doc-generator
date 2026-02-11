@@ -3,8 +3,13 @@ package com.abap.doc.plugin.handler;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
+import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.handlers.HandlerUtil;
@@ -18,6 +23,7 @@ public class BuildDagHandler extends AbstractHandler {
     @Override
     public Object execute(ExecutionEvent event) throws ExecutionException {
         Shell shell = HandlerUtil.getActiveShell(event);
+        Display display = shell.getDisplay();
         IPreferenceStore store = Activator.getDefault().getPreferenceStore();
 
         String systemUrl = store.getString(ConnectionPreferencePage.PREF_SYSTEM_URL);
@@ -55,20 +61,39 @@ public class BuildDagHandler extends AbstractHandler {
             objectType = "INTF";
         }
 
-        try {
-            DagRunner runner = new DagRunner();
-            String resultJson = runner.buildDag(systemUrl, client, username, password, objectName, objectType);
+        final String fObjectName = objectName;
+        final String fObjectType = objectType;
 
-            // Show result in a dialog (temporary until HTML preview is built)
-            String preview = resultJson.length() > 3000
-                ? resultJson.substring(0, 3000) + "\n\n... (truncated)"
-                : resultJson;
+        Job job = new Job("Building dependency graph for " + objectName) {
+            @Override
+            protected IStatus run(IProgressMonitor monitor) {
+                monitor.beginTask("Building dependency graph...", IProgressMonitor.UNKNOWN);
+                try {
+                    DagRunner runner = new DagRunner();
+                    String resultJson = runner.buildDag(systemUrl, client, username, password,
+                        fObjectName, fObjectType);
 
-            MessageDialog.openInformation(shell, "Dependency Graph — " + objectName, preview);
-        } catch (Exception e) {
-            MessageDialog.openError(shell, "ABAP Doc Generator",
-                "Failed to build dependency graph: " + e.getMessage());
-        }
+                    String preview = resultJson.length() > 3000
+                        ? resultJson.substring(0, 3000) + "\n\n... (truncated)"
+                        : resultJson;
+
+                    display.asyncExec(() ->
+                        MessageDialog.openInformation(shell,
+                            "Dependency Graph — " + fObjectName, preview));
+
+                    return Status.OK_STATUS;
+                } catch (Exception e) {
+                    display.asyncExec(() ->
+                        MessageDialog.openError(shell, "ABAP Doc Generator",
+                            "Failed to build dependency graph: " + e.getMessage()));
+                    return Status.error("DAG build failed", e);
+                } finally {
+                    monitor.done();
+                }
+            }
+        };
+        job.setUser(true);
+        job.schedule();
 
         return null;
     }
