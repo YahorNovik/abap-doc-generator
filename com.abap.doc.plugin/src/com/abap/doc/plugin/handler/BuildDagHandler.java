@@ -67,11 +67,12 @@ public class BuildDagHandler extends AbstractHandler {
         Job job = new Job("Building dependency graph for " + objectName) {
             @Override
             protected IStatus run(IProgressMonitor monitor) {
-                monitor.beginTask("Building dependency graph...", IProgressMonitor.UNKNOWN);
+                monitor.beginTask("Building dependency graph for " + fObjectName, IProgressMonitor.UNKNOWN);
                 try {
                     DagRunner runner = new DagRunner();
                     String resultJson = runner.buildDag(systemUrl, client, username, password,
-                        fObjectName, fObjectType);
+                        fObjectName, fObjectType,
+                        line -> monitor.subTask(line));
 
                     String preview = resultJson.length() > 3000
                         ? resultJson.substring(0, 3000) + "\n\n... (truncated)"

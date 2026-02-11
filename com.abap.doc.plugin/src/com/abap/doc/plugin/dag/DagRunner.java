@@ -1,12 +1,15 @@
 package com.abap.doc.plugin.dag;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.function.Consumer;
 
 import org.eclipse.core.runtime.Platform;
 import org.osgi.framework.Bundle;
@@ -18,7 +21,8 @@ public class DagRunner {
     private static java.nio.file.Path cachedScriptPath;
 
     public String buildDag(String systemUrl, String client, String username, String password,
-                           String objectName, String objectType) throws IOException, InterruptedException {
+                           String objectName, String objectType,
+                           Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildInputJson(systemUrl, client, username, password, objectName, objectType);
         String scriptPath = resolveScriptPath();
@@ -32,12 +36,30 @@ public class DagRunner {
             stdin.flush();
         }
 
+        // Read stderr in a separate thread for progress reporting
+        Thread stderrThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (progressCallback != null) {
+                        progressCallback.accept(line);
+                    }
+                }
+            } catch (IOException e) {
+                // ignore
+            }
+        }, "dag-builder-stderr");
+        stderrThread.setDaemon(true);
+        stderrThread.start();
+
         String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
 
         int exitCode = process.waitFor();
+        stderrThread.join(5000);
+
         if (exitCode != 0) {
-            throw new IOException("DAG builder failed (exit " + exitCode + "): " + stderr);
+            throw new IOException("DAG builder failed (exit " + exitCode + ")");
         }
 
         return stdout;

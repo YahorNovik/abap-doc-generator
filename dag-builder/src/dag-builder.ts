@@ -3,6 +3,13 @@ import { extractDependencies } from "./abap-parser";
 import { isCustomObject } from "./classifier";
 import { DagInput, DagResult, DagNode, DagEdge, AbapObjectType, ParsedDependency } from "./types";
 
+const MAX_NODES = 50;
+const CONCURRENT_FETCHES = 5;
+
+function log(msg: string): void {
+  process.stderr.write(`[dag-builder] ${msg}\n`);
+}
+
 /**
  * Builds a dependency DAG for an ABAP object by:
  * 1. Fetching the target object's source via ADT REST
@@ -15,8 +22,11 @@ export async function buildDag(input: DagInput): Promise<DagResult> {
   const errors: string[] = [];
 
   try {
+    log(`Connecting to ${input.systemUrl}...`);
     await client.connect();
+    log("Connected. Starting traversal...");
     const result = await traverse(client, input.objectName, input.objectType, errors);
+    log(`Done. ${result.nodes.length} nodes, ${result.edges.length} edges.`);
     return result;
   } finally {
     try {
@@ -45,6 +55,14 @@ async function traverse(
     if (visited.has(key)) continue;
     visited.add(key);
 
+    if (nodes.size >= MAX_NODES) {
+      log(`Reached max node limit (${MAX_NODES}). Stopping traversal.`);
+      errors.push(`Traversal stopped: reached maximum of ${MAX_NODES} nodes. Remaining queue: ${queue.length} objects.`);
+      break;
+    }
+
+    log(`[${nodes.size + 1}/${MAX_NODES}] Fetching ${current.type} ${key}...`);
+
     let source: string;
     try {
       source = await client.fetchSource(current.name, current.type);
@@ -71,45 +89,48 @@ async function traverse(
       continue;
     }
 
+    log(`  Found ${deps.length} dependencies for ${key}`);
+
+    // Separate custom and standard deps that haven't been seen yet
+    const newCustomDeps: ParsedDependency[] = [];
+    const newStandardDeps: ParsedDependency[] = [];
+
     for (const dep of deps) {
-      // Add edge
-      edges.push({
-        from: key,
-        to: dep.objectName,
-        references: dep.members,
-      });
+      edges.push({ from: key, to: dep.objectName, references: dep.members });
 
-      // Track reverse reference
-      if (!nodes.has(dep.objectName)) {
+      if (!nodes.has(dep.objectName) && !visited.has(dep.objectName)) {
         if (isCustomObject(dep.objectName)) {
-          // Custom: resolve type and enqueue for recursive traversal
-          const resolvedType = await resolveType(client, dep, errors);
-          queue.push({ name: dep.objectName, type: resolvedType });
+          newCustomDeps.push(dep);
         } else {
-          // Standard: fetch source but don't traverse further
-          let stdSource = "";
-          try {
-            const resolvedType = await resolveType(client, dep, errors);
-            stdSource = await client.fetchSource(dep.objectName, resolvedType);
-          } catch (err) {
-            errors.push(`Failed to fetch standard source for ${dep.objectName}: ${String(err)}`);
-          }
-
-          nodes.set(dep.objectName, {
-            name: dep.objectName,
-            type: dep.objectType,
-            isCustom: false,
-            source: stdSource,
-            usedBy: [],
-          });
+          newStandardDeps.push(dep);
         }
       }
 
-      // Update usedBy on the dependency node
+      // Update usedBy on existing nodes
       const depNode = nodes.get(dep.objectName);
       if (depNode && !depNode.usedBy.includes(key)) {
         depNode.usedBy.push(key);
       }
+    }
+
+    // Resolve custom deps and enqueue for recursive traversal
+    for (const dep of newCustomDeps) {
+      const resolvedType = await resolveType(client, dep, errors);
+      queue.push({ name: dep.objectName, type: resolvedType });
+    }
+
+    // Fetch standard deps concurrently (depth 1 only)
+    if (newStandardDeps.length > 0) {
+      log(`  Fetching ${newStandardDeps.length} standard dependencies...`);
+      await fetchStandardDepsBatch(client, newStandardDeps, nodes, errors);
+    }
+  }
+
+  // Update usedBy for any edges pointing to nodes created after the edge
+  for (const edge of edges) {
+    const depNode = nodes.get(edge.to);
+    if (depNode && !depNode.usedBy.includes(edge.from)) {
+      depNode.usedBy.push(edge.from);
     }
   }
 
@@ -123,6 +144,43 @@ async function traverse(
     topologicalOrder,
     errors,
   };
+}
+
+/**
+ * Fetch source for standard dependencies in parallel batches.
+ */
+async function fetchStandardDepsBatch(
+  client: AdtClientWrapper,
+  deps: ParsedDependency[],
+  nodes: Map<string, DagNode>,
+  errors: string[]
+): Promise<void> {
+  for (let i = 0; i < deps.length; i += CONCURRENT_FETCHES) {
+    const batch = deps.slice(i, i + CONCURRENT_FETCHES);
+    await Promise.all(
+      batch.map(async (dep) => {
+        if (nodes.has(dep.objectName)) return;
+
+        let stdSource = "";
+        let resolvedType = dep.objectType;
+        try {
+          const resolved = await resolveType(client, dep, errors);
+          resolvedType = resolved;
+          stdSource = await client.fetchSource(dep.objectName, resolved);
+        } catch (err) {
+          errors.push(`Failed to fetch standard source for ${dep.objectName}: ${String(err)}`);
+        }
+
+        nodes.set(dep.objectName, {
+          name: dep.objectName,
+          type: resolvedType,
+          isCustom: false,
+          source: stdSource,
+          usedBy: [],
+        });
+      })
+    );
+  }
 }
 
 async function resolveType(
@@ -157,27 +215,6 @@ async function resolveType(
  * Returns nodes in bottom-up order (leaves first).
  */
 function topologicalSort(nodes: Map<string, DagNode>, edges: DagEdge[]): string[] {
-  const inDegree = new Map<string, number>();
-  const adjacency = new Map<string, string[]>();
-
-  for (const name of nodes.keys()) {
-    inDegree.set(name, 0);
-    adjacency.set(name, []);
-  }
-
-  for (const edge of edges) {
-    if (nodes.has(edge.from) && nodes.has(edge.to)) {
-      adjacency.get(edge.from)!.push(edge.to);
-      inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
-    }
-  }
-
-  // Start with leaf nodes (no outgoing deps that are in our graph)
-  // We want bottom-up, so we reverse: start with nodes that have no incoming edges from deps perspective
-  // Actually for Kahn's: nodes with in-degree 0 are leaves (nothing depends on them as a dep)
-  // We need to reverse the edges: "from uses to" becomes "to is used by from"
-  // For bottom-up processing, we want leaves first
-
   const reverseInDegree = new Map<string, number>();
   const reverseAdj = new Map<string, string[]>();
 
