@@ -3,11 +3,10 @@ package com.abap.doc.plugin.handler;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
-import org.eclipse.jface.dialogs.InputDialog;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
-import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Shell;
+import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.handlers.HandlerUtil;
 
 import com.abap.doc.plugin.Activator;
@@ -32,16 +31,23 @@ public class BuildDagHandler extends AbstractHandler {
             return null;
         }
 
-        // Prompt for object name
-        InputDialog dialog = new InputDialog(shell, "ABAP Doc Generator",
-            "Enter ABAP object name (e.g., ZCL_MY_CLASS):", "", null);
-        if (dialog.open() != Window.OK) {
+        // Get object name from the active editor title
+        String objectName = null;
+        IEditorPart editor = HandlerUtil.getActiveEditor(event);
+        if (editor != null) {
+            objectName = editor.getTitle();
+            if (objectName != null) {
+                objectName = objectName.trim().toUpperCase();
+            }
+        }
+
+        if (objectName == null || objectName.isEmpty()) {
+            MessageDialog.openError(shell, "ABAP Doc Generator",
+                "Please open an ABAP object in the editor first.");
             return null;
         }
-        String objectName = dialog.getValue().trim().toUpperCase();
-        if (objectName.isEmpty()) return null;
 
-        // Default to CLAS, could be extended with a type selector
+        // Determine object type from name
         String objectType = "CLAS";
         if (objectName.startsWith("ZIF_") || objectName.startsWith("YIF_")
             || objectName.startsWith("IF_")) {

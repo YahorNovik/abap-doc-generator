@@ -10,13 +10,14 @@
         </category>
         <command
             id="com.abap.doc.command.buildDag"
-            name="Build Dependency Graph"
+            name="Generate ABAP Documentation"
             categoryId="com.abap.doc.commands.category">
         </command>
     </extension>
 
-    <!-- Menu contribution: context menu -->
+    <!-- Menu contributions: context menu + main menu -->
     <extension point="org.eclipse.ui.menus">
+        <!-- Context menu (right-click) -->
         <menuContribution
             allPopups="false"
             locationURI="popup:org.eclipse.ui.popup.any?after=additions">
@@ -26,6 +27,20 @@
                 style="push">
             </command>
         </menuContribution>
+        <!-- Main menu bar -->
+        <menuContribution
+            allPopups="false"
+            locationURI="menu:org.eclipse.ui.main.menu?after=additions">
+            <menu
+                id="com.abap.doc.menu"
+                label="ABAP Doc">
+                <command
+                    commandId="com.abap.doc.command.buildDag"
+                    label="Generate Documentation for Current Editor"
+                    style="push">
+                </command>
+            </menu>
+        </menuContribution>
     </extension>
 
     <!-- Handler -->
@@ -34,6 +49,15 @@
             class="com.abap.doc.plugin.handler.BuildDagHandler"
             commandId="com.abap.doc.command.buildDag">
         </handler>
+    </extension>
+
+    <!-- Keybinding: Ctrl+Shift+D -->
+    <extension point="org.eclipse.ui.bindings">
+        <key
+            commandId="com.abap.doc.command.buildDag"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+D">
+        </key>
     </extension>
 
     <!-- Preferences page -->

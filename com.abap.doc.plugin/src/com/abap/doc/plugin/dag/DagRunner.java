@@ -1,18 +1,21 @@
 package com.abap.doc.plugin.dag;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 
-import org.eclipse.core.runtime.FileLocator;
-import org.eclipse.core.runtime.Path;
 import org.eclipse.core.runtime.Platform;
 import org.osgi.framework.Bundle;
 
 import com.abap.doc.plugin.Activator;
 
 public class DagRunner {
+
+    private static java.nio.file.Path cachedScriptPath;
 
     public String buildDag(String systemUrl, String client, String username, String password,
                            String objectName, String objectType) throws IOException, InterruptedException {
@@ -40,13 +43,27 @@ public class DagRunner {
         return stdout;
     }
 
-    private String resolveScriptPath() throws IOException {
-        Bundle bundle = Platform.getBundle(Activator.PLUGIN_ID);
-        URL scriptUrl = FileLocator.find(bundle, new Path("node/dag-builder.js"), null);
-        if (scriptUrl == null) {
-            throw new IOException("DAG builder script not found in plugin bundle");
+    private synchronized String resolveScriptPath() throws IOException {
+        if (cachedScriptPath != null && Files.exists(cachedScriptPath)) {
+            return cachedScriptPath.toString();
         }
-        return FileLocator.toFileURL(scriptUrl).getPath();
+
+        Bundle bundle = Platform.getBundle(Activator.PLUGIN_ID);
+        URL entry = bundle.getEntry("node/dag-builder.js");
+        if (entry == null) {
+            throw new IOException("DAG builder script not found in plugin bundle. "
+                + "Bundle location: " + bundle.getLocation());
+        }
+
+        java.nio.file.Path tempFile = Files.createTempFile("abap-doc-dag-builder-", ".js");
+        tempFile.toFile().deleteOnExit();
+
+        try (InputStream in = entry.openStream()) {
+            Files.copy(in, tempFile, StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        cachedScriptPath = tempFile;
+        return cachedScriptPath.toString();
     }
 
     private static String buildInputJson(String systemUrl, String client, String username,
