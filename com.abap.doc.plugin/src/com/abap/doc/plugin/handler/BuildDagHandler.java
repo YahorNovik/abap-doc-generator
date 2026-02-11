@@ -1,5 +1,9 @@
 package com.abap.doc.plugin.handler;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
@@ -12,7 +16,10 @@ import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorPart;
+import org.eclipse.ui.IWorkbenchPage;
+import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.handlers.HandlerUtil;
+import org.eclipse.ui.ide.IDE;
 
 import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.dag.DagRunner;
@@ -74,13 +81,26 @@ public class BuildDagHandler extends AbstractHandler {
                         fObjectName, fObjectType,
                         line -> monitor.subTask(line));
 
-                    String preview = resultJson.length() > 3000
-                        ? resultJson.substring(0, 3000) + "\n\n... (truncated)"
-                        : resultJson;
+                    // Pretty-print JSON (basic indentation)
+                    String prettyJson = prettyPrintJson(resultJson);
 
-                    display.asyncExec(() ->
-                        MessageDialog.openInformation(shell,
-                            "Dependency Graph — " + fObjectName, preview));
+                    // Write to temp file and open in editor
+                    File tempFile = File.createTempFile("dag-" + fObjectName + "-", ".json");
+                    tempFile.deleteOnExit();
+                    Files.writeString(tempFile.toPath(), prettyJson, StandardCharsets.UTF_8);
+
+                    display.asyncExec(() -> {
+                        try {
+                            IWorkbenchPage page = PlatformUI.getWorkbench()
+                                .getActiveWorkbenchWindow().getActivePage();
+                            IDE.openEditorOnFileStore(page,
+                                org.eclipse.core.filesystem.EFS.getLocalFileSystem()
+                                    .fromLocalFile(tempFile));
+                        } catch (Exception e) {
+                            MessageDialog.openError(shell, "ABAP Doc Generator",
+                                "Failed to open result: " + e.getMessage());
+                        }
+                    });
 
                     return Status.OK_STATUS;
                 } catch (Exception e) {
@@ -97,5 +117,73 @@ public class BuildDagHandler extends AbstractHandler {
         job.schedule();
 
         return null;
+    }
+
+    /**
+     * Minimal JSON pretty-printer (no external dependencies).
+     */
+    private static String prettyPrintJson(String json) {
+        StringBuilder sb = new StringBuilder();
+        int indent = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+
+            if (escaped) {
+                sb.append(c);
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\' && inString) {
+                sb.append(c);
+                escaped = true;
+                continue;
+            }
+
+            if (c == '"') {
+                inString = !inString;
+                sb.append(c);
+                continue;
+            }
+
+            if (inString) {
+                sb.append(c);
+                continue;
+            }
+
+            switch (c) {
+                case '{':
+                case '[':
+                    sb.append(c);
+                    sb.append('\n');
+                    indent++;
+                    sb.append("  ".repeat(indent));
+                    break;
+                case '}':
+                case ']':
+                    sb.append('\n');
+                    indent--;
+                    sb.append("  ".repeat(indent));
+                    sb.append(c);
+                    break;
+                case ',':
+                    sb.append(c);
+                    sb.append('\n');
+                    sb.append("  ".repeat(indent));
+                    break;
+                case ':':
+                    sb.append(c);
+                    sb.append(' ');
+                    break;
+                default:
+                    if (!Character.isWhitespace(c)) {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
     }
 }
