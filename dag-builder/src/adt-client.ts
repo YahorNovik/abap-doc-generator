@@ -1,5 +1,4 @@
 import { ADTClient, SearchResult } from "abap-adt-api";
-import { AbapObjectType } from "./types";
 
 export class AdtClientWrapper {
   private client: ADTClient;
@@ -17,15 +16,22 @@ export class AdtClientWrapper {
   }
 
   /**
-   * Fetches the ABAP source code for a given object.
+   * Fetches the ABAP source code for a given object using the proper ADT pattern:
+   * searchObject → objectStructure → mainInclude → getObjectSource
    */
-  async fetchSource(objectName: string, objectType: AbapObjectType): Promise<string> {
-    const sourceUrl = this.buildSourceUrl(objectName, objectType);
+  async fetchSource(objectName: string): Promise<string> {
+    const objectUrl = await this.resolveObjectUrl(objectName);
+    if (!objectUrl) {
+      throw new Error(`Resource ${objectName} not found via ADT search.`);
+    }
+
+    const structure = await this.client.objectStructure(objectUrl);
+    const sourceUrl = ADTClient.mainInclude(structure);
     return this.client.getObjectSource(sourceUrl);
   }
 
   /**
-   * Searches for an object and returns its type from the ADT search results.
+   * Searches for an object and returns its ADT type and URI.
    */
   async resolveObjectType(objectName: string): Promise<{ type: string; uri: string } | undefined> {
     const results: SearchResult[] = await this.client.searchObject(objectName, undefined, 10);
@@ -39,20 +45,15 @@ export class AdtClientWrapper {
     };
   }
 
-  private buildSourceUrl(objectName: string, objectType: AbapObjectType): string {
-    const name = objectName.toLowerCase();
-    switch (objectType) {
-      case "CLAS":
-        return `/sap/bc/adt/oo/classes/${name}/source/main`;
-      case "INTF":
-        return `/sap/bc/adt/oo/interfaces/${name}/source/main`;
-      case "PROG":
-        return `/sap/bc/adt/programs/programs/${name}/source/main`;
-      case "FUGR":
-        return `/sap/bc/adt/functions/groups/${name}/source/main`;
-      default:
-        throw new Error(`Unsupported object type: ${objectType}`);
-    }
+  /**
+   * Resolves the ADT URI for an object via search.
+   */
+  private async resolveObjectUrl(objectName: string): Promise<string | undefined> {
+    const results: SearchResult[] = await this.client.searchObject(objectName, undefined, 10);
+    const match = results.find(
+      (r) => r["adtcore:name"].toUpperCase() === objectName.toUpperCase()
+    );
+    return match?.["adtcore:uri"];
   }
 
   /**

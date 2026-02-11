@@ -6,10 +6,10 @@ import { DagResult, DagNode, DagEdge } from "../src/types";
 
 function buildMockDag(): DagResult {
   const nodes: DagNode[] = [
-    { name: "ZCL_ROOT", type: "CLAS", isCustom: true, source: "...", usedBy: [] },
-    { name: "ZCL_HELPER", type: "CLAS", isCustom: true, source: "...", usedBy: ["ZCL_ROOT"] },
-    { name: "ZCL_UTILS", type: "CLAS", isCustom: true, source: "...", usedBy: ["ZCL_ROOT", "ZCL_HELPER"] },
-    { name: "CL_STANDARD", type: "CLAS", isCustom: false, source: "...", usedBy: ["ZCL_UTILS"] },
+    { name: "ZCL_ROOT", type: "CLAS", isCustom: true, sourceAvailable: true, usedBy: [] },
+    { name: "ZCL_HELPER", type: "CLAS", isCustom: true, sourceAvailable: true, usedBy: ["ZCL_ROOT"] },
+    { name: "ZCL_UTILS", type: "CLAS", isCustom: true, sourceAvailable: true, usedBy: ["ZCL_ROOT", "ZCL_HELPER"] },
+    { name: "CL_STANDARD", type: "CLAS", isCustom: false, sourceAvailable: false, usedBy: ["ZCL_UTILS"] },
   ];
 
   const edges: DagEdge[] = [
@@ -71,5 +71,13 @@ describe("DAG structure", () => {
     const utils = dag.nodes.find((n) => n.name === "ZCL_UTILS");
     expect(utils!.usedBy).toContain("ZCL_ROOT");
     expect(utils!.usedBy).toContain("ZCL_HELPER");
+  });
+
+  it("should mark standard objects as sourceAvailable=false", () => {
+    const dag = buildMockDag();
+    const standard = dag.nodes.find((n) => n.name === "CL_STANDARD");
+    expect(standard!.sourceAvailable).toBe(false);
+    const custom = dag.nodes.find((n) => n.name === "ZCL_ROOT");
+    expect(custom!.sourceAvailable).toBe(true);
   });
 });

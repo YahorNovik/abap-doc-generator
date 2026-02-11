@@ -1,10 +1,9 @@
 import { AdtClientWrapper } from "./adt-client";
 import { extractDependencies } from "./abap-parser";
 import { isCustomObject } from "./classifier";
-import { DagInput, DagResult, DagNode, DagEdge, AbapObjectType, ParsedDependency } from "./types";
+import { DagInput, DagResult, DagNode, DagEdge, ParsedDependency } from "./types";
 
 const MAX_NODES = 50;
-const CONCURRENT_FETCHES = 5;
 
 function log(msg: string): void {
   process.stderr.write(`[dag-builder] ${msg}\n`);
@@ -15,7 +14,7 @@ function log(msg: string): void {
  * 1. Fetching the target object's source via ADT REST
  * 2. Parsing it with abaplint to find dependencies
  * 3. Recursively traversing custom (Z/Y) dependencies
- * 4. Fetching source for standard dependencies (depth 1) without further traversal
+ * 4. Recording standard dependencies as leaf nodes (source fetched later by agent)
  */
 export async function buildDag(input: DagInput): Promise<DagResult> {
   const client = new AdtClientWrapper(input.systemUrl, input.username, input.password, input.client);
@@ -40,13 +39,13 @@ export async function buildDag(input: DagInput): Promise<DagResult> {
 async function traverse(
   client: AdtClientWrapper,
   rootName: string,
-  rootType: AbapObjectType,
+  rootType: string,
   errors: string[]
 ): Promise<DagResult> {
   const nodes = new Map<string, DagNode>();
   const edges: DagEdge[] = [];
   const visited = new Set<string>();
-  const queue: Array<{ name: string; type: AbapObjectType }> = [{ name: rootName, type: rootType }];
+  const queue: Array<{ name: string; type: string }> = [{ name: rootName, type: rootType }];
 
   while (queue.length > 0) {
     const current = queue.shift()!;
@@ -61,29 +60,30 @@ async function traverse(
       break;
     }
 
-    log(`[${nodes.size + 1}/${MAX_NODES}] Fetching ${current.type} ${key}...`);
+    log(`[${nodes.size + 1}/${MAX_NODES}] Fetching ${key}...`);
 
+    // Fetch source for custom objects (needed for dependency parsing)
     let source: string;
     try {
-      source = await client.fetchSource(current.name, current.type);
+      source = await client.fetchSource(current.name);
     } catch (err) {
       errors.push(`Failed to fetch source for ${current.name}: ${String(err)}`);
       continue;
     }
 
-    // Add node
+    // Add node (without source in output)
     nodes.set(key, {
       name: key,
       type: current.type,
       isCustom: isCustomObject(current.name),
-      source,
+      sourceAvailable: true,
       usedBy: [],
     });
 
     // Parse dependencies
     let deps: ParsedDependency[];
     try {
-      deps = extractDependencies(source, current.name, current.type);
+      deps = extractDependencies(source, current.name, current.type as any);
     } catch (err) {
       errors.push(`Failed to parse dependencies for ${current.name}: ${String(err)}`);
       continue;
@@ -91,18 +91,23 @@ async function traverse(
 
     log(`  Found ${deps.length} dependencies for ${key}`);
 
-    // Separate custom and standard deps that haven't been seen yet
-    const newCustomDeps: ParsedDependency[] = [];
-    const newStandardDeps: ParsedDependency[] = [];
-
     for (const dep of deps) {
       edges.push({ from: key, to: dep.objectName, references: dep.members });
 
       if (!nodes.has(dep.objectName) && !visited.has(dep.objectName)) {
         if (isCustomObject(dep.objectName)) {
-          newCustomDeps.push(dep);
+          // Custom: resolve type and enqueue for recursive traversal
+          const resolvedType = await resolveType(client, dep, errors);
+          queue.push({ name: dep.objectName, type: resolvedType });
         } else {
-          newStandardDeps.push(dep);
+          // Standard: record as leaf node, don't fetch source
+          nodes.set(dep.objectName, {
+            name: dep.objectName,
+            type: dep.objectType || "UNKNOWN",
+            isCustom: false,
+            sourceAvailable: false,
+            usedBy: [],
+          });
         }
       }
 
@@ -112,21 +117,9 @@ async function traverse(
         depNode.usedBy.push(key);
       }
     }
-
-    // Resolve custom deps and enqueue for recursive traversal
-    for (const dep of newCustomDeps) {
-      const resolvedType = await resolveType(client, dep, errors);
-      queue.push({ name: dep.objectName, type: resolvedType });
-    }
-
-    // Fetch standard deps concurrently (depth 1 only)
-    if (newStandardDeps.length > 0) {
-      log(`  Fetching ${newStandardDeps.length} standard dependencies...`);
-      await fetchStandardDepsBatch(client, newStandardDeps, nodes, errors);
-    }
   }
 
-  // Update usedBy for any edges pointing to nodes created after the edge
+  // Fix usedBy for edges added after node creation
   for (const edge of edges) {
     const depNode = nodes.get(edge.to);
     if (depNode && !depNode.usedBy.includes(edge.from)) {
@@ -134,7 +127,6 @@ async function traverse(
     }
   }
 
-  // Topological sort (bottom-up: leaves first)
   const topologicalOrder = topologicalSort(nodes, edges);
 
   return {
@@ -146,67 +138,24 @@ async function traverse(
   };
 }
 
-/**
- * Fetch source for standard dependencies in parallel batches.
- */
-async function fetchStandardDepsBatch(
-  client: AdtClientWrapper,
-  deps: ParsedDependency[],
-  nodes: Map<string, DagNode>,
-  errors: string[]
-): Promise<void> {
-  for (let i = 0; i < deps.length; i += CONCURRENT_FETCHES) {
-    const batch = deps.slice(i, i + CONCURRENT_FETCHES);
-    await Promise.all(
-      batch.map(async (dep) => {
-        if (nodes.has(dep.objectName)) return;
-
-        let stdSource = "";
-        let resolvedType = dep.objectType;
-        try {
-          const resolved = await resolveType(client, dep, errors);
-          resolvedType = resolved;
-          stdSource = await client.fetchSource(dep.objectName, resolved);
-        } catch (err) {
-          errors.push(`Failed to fetch standard source for ${dep.objectName}: ${String(err)}`);
-        }
-
-        nodes.set(dep.objectName, {
-          name: dep.objectName,
-          type: resolvedType,
-          isCustom: false,
-          source: stdSource,
-          usedBy: [],
-        });
-      })
-    );
-  }
-}
-
 async function resolveType(
   client: AdtClientWrapper,
   dep: ParsedDependency,
   errors: string[]
-): Promise<AbapObjectType> {
-  // If we already know the type from abaplint
+): Promise<string> {
   if (dep.objectType === "CLAS" || dep.objectType === "INTF") {
     return dep.objectType;
   }
 
-  // Try to resolve via ADT search
   try {
     const resolved = await client.resolveObjectType(dep.objectName);
     if (resolved) {
-      const type = resolved.type as AbapObjectType;
-      if (["CLAS", "INTF", "PROG", "FUGR"].includes(type)) {
-        return type;
-      }
+      return resolved.type;
     }
   } catch (err) {
     errors.push(`Failed to resolve type for ${dep.objectName}: ${String(err)}`);
   }
 
-  // Default to CLAS if we can't determine
   return "CLAS";
 }
 
@@ -225,7 +174,6 @@ function topologicalSort(nodes: Map<string, DagNode>, edges: DagEdge[]): string[
 
   for (const edge of edges) {
     if (nodes.has(edge.from) && nodes.has(edge.to)) {
-      // Reverse: "to" -> "from" (dependency points to dependent)
       reverseAdj.get(edge.to)!.push(edge.from);
       reverseInDegree.set(edge.from, (reverseInDegree.get(edge.from) ?? 0) + 1);
     }
@@ -252,7 +200,6 @@ function topologicalSort(nodes: Map<string, DagNode>, edges: DagEdge[]): string[
     }
   }
 
-  // If there are cycles, add remaining nodes at the end
   for (const name of nodes.keys()) {
     if (!result.includes(name)) {
       result.push(name);

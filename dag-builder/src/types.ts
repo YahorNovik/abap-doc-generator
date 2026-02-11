@@ -4,16 +4,14 @@ export interface DagInput {
   username: string;
   password: string;
   objectName: string;
-  objectType: AbapObjectType;
+  objectType: string;
 }
-
-export type AbapObjectType = "CLAS" | "INTF" | "PROG" | "FUGR";
 
 export interface DagNode {
   name: string;
   type: string;
   isCustom: boolean;
-  source: string;
+  sourceAvailable: boolean;
   usedBy: string[];
 }
 
