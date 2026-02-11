@@ -32,12 +32,13 @@ public class BuildDagHandler extends AbstractHandler {
         }
 
         // Get object name from the active editor title
+        // ADT editor titles look like "[SYS] ZCL_MY_CLASS" — strip the system prefix
         String objectName = null;
         IEditorPart editor = HandlerUtil.getActiveEditor(event);
         if (editor != null) {
             objectName = editor.getTitle();
             if (objectName != null) {
-                objectName = objectName.trim().toUpperCase();
+                objectName = objectName.replaceAll("^\\[.*?\\]\\s*", "").trim().toUpperCase();
             }
         }
 
