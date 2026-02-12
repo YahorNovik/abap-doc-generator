@@ -160,29 +160,17 @@ function processReference(
     return;
   }
 
-  // Type references (resolved)
-  if (refType === ReferenceType.TypeReference) {
-    const ooName = ref.extra?.ooName;
-    if (!ooName || ooName.toUpperCase() === selfName.toUpperCase()) return;
-
-    const dep = getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? "Void");
-    const memberName = ref.position.getName();
-    if (memberName && !dep.members.some((m) => m.memberName === memberName && m.memberType === "type")) {
-      dep.members.push({
-        memberName,
-        memberType: "type",
-        line: ref.position.getStart().getRow(),
-      });
-    }
-    return;
-  }
-
-  // Void type references (TYPE REF TO unknown_class, TYPE unknown_table, etc.)
+  // Void type references — only keep those that look like class/interface names
+  // (TYPE REF TO zcl_something, etc.). Skip data elements, table types, etc.
   if (refType === ReferenceType.VoidType) {
     const typeName = ref.extra?.ooName ?? ref.position.getName();
     if (!typeName || typeName.toUpperCase() === selfName.toUpperCase()) return;
 
-    getOrCreateDep(depMap, typeName, ref.extra?.ooType ?? "Void");
+    const upper = typeName.toUpperCase();
+    // Only include if it looks like a class or interface name
+    if (upper.match(/^[YZ]?C[LX]_/) || upper.match(/^[YZ]?IF_/) || upper.match(/^IF_/) || upper.match(/^CL_/) || upper.match(/^CX_/)) {
+      getOrCreateDep(depMap, typeName, ref.extra?.ooType === "INTF" ? "INTF" : "CLAS");
+    }
     return;
   }
 
