@@ -190,6 +190,41 @@ async function resolveType(
 }
 
 /**
+ * Fetches ABAP source for a list of DAG nodes via ADT.
+ * Returns a map of node name → source code.
+ */
+export async function fetchSourceForNodes(
+  client: AdtClientWrapper,
+  nodes: DagNode[],
+  errors: string[],
+): Promise<Map<string, string>> {
+  const sources = new Map<string, string>();
+  for (const node of nodes) {
+    try {
+      const source = await client.fetchSource(node.name);
+      sources.set(node.name, source);
+    } catch (err) {
+      errors.push(`Failed to fetch source for ${node.name}: ${String(err)}`);
+    }
+  }
+  return sources;
+}
+
+/**
+ * Creates and connects an ADT client. Caller is responsible for disconnecting.
+ */
+export async function createConnectedClient(
+  systemUrl: string,
+  username: string,
+  password: string,
+  client: string,
+): Promise<AdtClientWrapper> {
+  const adtClient = new AdtClientWrapper(systemUrl, username, password, client);
+  await adtClient.connect();
+  return adtClient;
+}
+
+/**
  * Kahn's algorithm for topological sort.
  * Returns nodes in bottom-up order (leaves first).
  */

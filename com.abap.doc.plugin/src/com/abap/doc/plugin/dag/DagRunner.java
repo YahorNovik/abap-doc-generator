@@ -25,44 +25,7 @@ public class DagRunner {
                            Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildInputJson(systemUrl, client, username, password, objectName, objectType);
-        String scriptPath = resolveScriptPath();
-
-        ProcessBuilder pb = new ProcessBuilder("node", scriptPath);
-        pb.redirectErrorStream(false);
-        Process process = pb.start();
-
-        try (OutputStream stdin = process.getOutputStream()) {
-            stdin.write(input.getBytes(StandardCharsets.UTF_8));
-            stdin.flush();
-        }
-
-        // Read stderr in a separate thread for progress reporting
-        Thread stderrThread = new Thread(() -> {
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (progressCallback != null) {
-                        progressCallback.accept(line);
-                    }
-                }
-            } catch (IOException e) {
-                // ignore
-            }
-        }, "dag-builder-stderr");
-        stderrThread.setDaemon(true);
-        stderrThread.start();
-
-        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-
-        int exitCode = process.waitFor();
-        stderrThread.join(5000);
-
-        if (exitCode != 0) {
-            throw new IOException("DAG builder failed (exit " + exitCode + ")");
-        }
-
-        return stdout;
+        return runScript(input, progressCallback);
     }
 
     private synchronized String resolveScriptPath() throws IOException {
@@ -88,6 +51,58 @@ public class DagRunner {
         return cachedScriptPath.toString();
     }
 
+    public String generateDoc(String systemUrl, String client, String username, String password,
+                              String objectName, String objectType,
+                              String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
+                              String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                              Consumer<String> progressCallback) throws IOException, InterruptedException {
+
+        String input = buildDocInputJson(systemUrl, client, username, password, objectName, objectType,
+            summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
+            docProvider, docApiKey, docModel, docBaseUrl);
+        return runScript(input, progressCallback);
+    }
+
+    private String runScript(String input, Consumer<String> progressCallback) throws IOException, InterruptedException {
+        String scriptPath = resolveScriptPath();
+
+        ProcessBuilder pb = new ProcessBuilder("node", scriptPath);
+        pb.redirectErrorStream(false);
+        Process process = pb.start();
+
+        try (OutputStream stdin = process.getOutputStream()) {
+            stdin.write(input.getBytes(StandardCharsets.UTF_8));
+            stdin.flush();
+        }
+
+        Thread stderrThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (progressCallback != null) {
+                        progressCallback.accept(line);
+                    }
+                }
+            } catch (IOException e) {
+                // ignore
+            }
+        }, "dag-builder-stderr");
+        stderrThread.setDaemon(true);
+        stderrThread.start();
+
+        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        int exitCode = process.waitFor();
+        stderrThread.join(5000);
+
+        if (exitCode != 0) {
+            throw new IOException("Script failed (exit " + exitCode + ")");
+        }
+
+        return stdout;
+    }
+
     private static String buildInputJson(String systemUrl, String client, String username,
                                           String password, String objectName, String objectType) {
         return String.format(
@@ -95,6 +110,37 @@ public class DagRunner {
             escapeJson(systemUrl), escapeJson(client), escapeJson(username),
             escapeJson(password), escapeJson(objectName), escapeJson(objectType)
         );
+    }
+
+    private static String buildDocInputJson(String systemUrl, String client, String username, String password,
+                                             String objectName, String objectType,
+                                             String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
+                                             String docProvider, String docApiKey, String docModel, String docBaseUrl) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"command\":\"generate-doc\"");
+        sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
+        sb.append(",\"client\":\"").append(escapeJson(client)).append("\"");
+        sb.append(",\"username\":\"").append(escapeJson(username)).append("\"");
+        sb.append(",\"password\":\"").append(escapeJson(password)).append("\"");
+        sb.append(",\"objectName\":\"").append(escapeJson(objectName)).append("\"");
+        sb.append(",\"objectType\":\"").append(escapeJson(objectType)).append("\"");
+        sb.append(",\"summaryLlm\":{");
+        sb.append("\"provider\":\"").append(escapeJson(summaryProvider)).append("\"");
+        sb.append(",\"apiKey\":\"").append(escapeJson(summaryApiKey)).append("\"");
+        sb.append(",\"model\":\"").append(escapeJson(summaryModel)).append("\"");
+        if (summaryBaseUrl != null && !summaryBaseUrl.isEmpty()) {
+            sb.append(",\"baseUrl\":\"").append(escapeJson(summaryBaseUrl)).append("\"");
+        }
+        sb.append("}");
+        sb.append(",\"docLlm\":{");
+        sb.append("\"provider\":\"").append(escapeJson(docProvider)).append("\"");
+        sb.append(",\"apiKey\":\"").append(escapeJson(docApiKey)).append("\"");
+        sb.append(",\"model\":\"").append(escapeJson(docModel)).append("\"");
+        if (docBaseUrl != null && !docBaseUrl.isEmpty()) {
+            sb.append(",\"baseUrl\":\"").append(escapeJson(docBaseUrl)).append("\"");
+        }
+        sb.append("}}");
+        return sb.toString();
     }
 
     private static String escapeJson(String value) {

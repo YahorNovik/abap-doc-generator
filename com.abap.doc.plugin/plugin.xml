@@ -10,6 +10,11 @@
         </category>
         <command
             id="com.abap.doc.command.buildDag"
+            name="Build Dependency Graph"
+            categoryId="com.abap.doc.commands.category">
+        </command>
+        <command
+            id="com.abap.doc.command.generateDoc"
             name="Generate ABAP Documentation"
             categoryId="com.abap.doc.commands.category">
         </command>
@@ -22,8 +27,13 @@
             allPopups="false"
             locationURI="popup:org.eclipse.ui.popup.any?after=additions">
             <command
-                commandId="com.abap.doc.command.buildDag"
+                commandId="com.abap.doc.command.generateDoc"
                 label="Generate ABAP Documentation"
+                style="push">
+            </command>
+            <command
+                commandId="com.abap.doc.command.buildDag"
+                label="Build Dependency Graph"
                 style="push">
             </command>
         </menuContribution>
@@ -35,28 +45,44 @@
                 id="com.abap.doc.menu"
                 label="ABAP Doc">
                 <command
-                    commandId="com.abap.doc.command.buildDag"
+                    commandId="com.abap.doc.command.generateDoc"
                     label="Generate Documentation for Current Editor"
+                    style="push">
+                </command>
+                <command
+                    commandId="com.abap.doc.command.buildDag"
+                    label="Build Dependency Graph"
                     style="push">
                 </command>
             </menu>
         </menuContribution>
     </extension>
 
-    <!-- Handler -->
+    <!-- Handlers -->
     <extension point="org.eclipse.ui.handlers">
         <handler
             class="com.abap.doc.plugin.handler.BuildDagHandler"
             commandId="com.abap.doc.command.buildDag">
         </handler>
+        <handler
+            class="com.abap.doc.plugin.handler.GenerateDocHandler"
+            commandId="com.abap.doc.command.generateDoc">
+        </handler>
     </extension>
 
-    <!-- Keybinding: Ctrl+Shift+D -->
+    <!-- Keybindings -->
     <extension point="org.eclipse.ui.bindings">
+        <!-- Ctrl+Shift+D: Generate Documentation -->
+        <key
+            commandId="com.abap.doc.command.generateDoc"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+D">
+        </key>
+        <!-- Ctrl+Shift+G: Build Dependency Graph -->
         <key
             commandId="com.abap.doc.command.buildDag"
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
-            sequence="M1+M2+D">
+            sequence="M1+M2+G">
         </key>
     </extension>
 

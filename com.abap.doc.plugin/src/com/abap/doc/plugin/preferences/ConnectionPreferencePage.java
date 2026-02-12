@@ -1,5 +1,6 @@
 package com.abap.doc.plugin.preferences;
 
+import org.eclipse.jface.preference.ComboFieldEditor;
 import org.eclipse.jface.preference.FieldEditorPreferencePage;
 import org.eclipse.jface.preference.StringFieldEditor;
 import org.eclipse.ui.IWorkbench;
@@ -9,23 +10,55 @@ import com.abap.doc.plugin.Activator;
 
 public class ConnectionPreferencePage extends FieldEditorPreferencePage implements IWorkbenchPreferencePage {
 
+    // SAP connection
     public static final String PREF_SYSTEM_URL = "systemUrl";
     public static final String PREF_CLIENT = "client";
     public static final String PREF_USERNAME = "username";
     public static final String PREF_PASSWORD = "password";
 
+    // Summary LLM (cheap/fast model for dependency summaries)
+    public static final String PREF_SUMMARY_PROVIDER = "summaryLlmProvider";
+    public static final String PREF_SUMMARY_API_KEY = "summaryLlmApiKey";
+    public static final String PREF_SUMMARY_MODEL = "summaryLlmModel";
+    public static final String PREF_SUMMARY_BASE_URL = "summaryLlmBaseUrl";
+
+    // Documentation LLM (capable model for final documentation)
+    public static final String PREF_DOC_PROVIDER = "docLlmProvider";
+    public static final String PREF_DOC_API_KEY = "docLlmApiKey";
+    public static final String PREF_DOC_MODEL = "docLlmModel";
+    public static final String PREF_DOC_BASE_URL = "docLlmBaseUrl";
+
+    private static final String[][] PROVIDER_OPTIONS = {
+        { "Gemini", "gemini" },
+        { "OpenAI", "openai" },
+        { "OpenAI-compatible", "openai-compatible" }
+    };
+
     public ConnectionPreferencePage() {
         super(GRID);
         setPreferenceStore(Activator.getDefault().getPreferenceStore());
-        setDescription("SAP System Connection Settings");
+        setDescription("ABAP Doc Generator Settings");
     }
 
     @Override
     protected void createFieldEditors() {
+        // SAP Connection
         addField(new StringFieldEditor(PREF_SYSTEM_URL, "System URL:", getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_CLIENT, "Client:", getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_USERNAME, "Username:", getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_PASSWORD, "Password:", getFieldEditorParent()));
+
+        // Summary LLM
+        addField(new ComboFieldEditor(PREF_SUMMARY_PROVIDER, "Summary LLM Provider:", PROVIDER_OPTIONS, getFieldEditorParent()));
+        addField(new StringFieldEditor(PREF_SUMMARY_API_KEY, "Summary LLM API Key:", getFieldEditorParent()));
+        addField(new StringFieldEditor(PREF_SUMMARY_MODEL, "Summary LLM Model:", getFieldEditorParent()));
+        addField(new StringFieldEditor(PREF_SUMMARY_BASE_URL, "Summary LLM Base URL (optional):", getFieldEditorParent()));
+
+        // Documentation LLM
+        addField(new ComboFieldEditor(PREF_DOC_PROVIDER, "Doc LLM Provider:", PROVIDER_OPTIONS, getFieldEditorParent()));
+        addField(new StringFieldEditor(PREF_DOC_API_KEY, "Doc LLM API Key:", getFieldEditorParent()));
+        addField(new StringFieldEditor(PREF_DOC_MODEL, "Doc LLM Model:", getFieldEditorParent()));
+        addField(new StringFieldEditor(PREF_DOC_BASE_URL, "Doc LLM Base URL (optional):", getFieldEditorParent()));
     }
 
     @Override

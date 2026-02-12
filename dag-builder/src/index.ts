@@ -1,25 +1,35 @@
 import { buildDag } from "./dag-builder";
-import { DagInput } from "./types";
+import { generateDocumentation } from "./doc-generator";
 
 async function main(): Promise<void> {
-  const input = await readStdin();
+  const raw = await readStdin();
 
-  let dagInput: DagInput;
+  let input: any;
   try {
-    dagInput = JSON.parse(input);
+    input = JSON.parse(raw);
   } catch {
     process.stderr.write("Error: Invalid JSON input\n");
     process.exit(1);
   }
 
-  if (!dagInput.systemUrl || !dagInput.objectName) {
+  if (!input.systemUrl || !input.objectName) {
     process.stderr.write("Error: systemUrl and objectName are required\n");
     process.exit(1);
   }
 
   try {
-    const result = await buildDag(dagInput);
-    process.stdout.write(JSON.stringify(result));
+    if (input.command === "generate-doc") {
+      if (!input.summaryLlm || !input.docLlm) {
+        process.stderr.write("Error: summaryLlm and docLlm configs are required for generate-doc\n");
+        process.exit(1);
+      }
+      const result = await generateDocumentation(input);
+      process.stdout.write(JSON.stringify(result));
+    } else {
+      // Default: build-dag (backward compatible)
+      const result = await buildDag(input);
+      process.stdout.write(JSON.stringify(result));
+    }
   } catch (err) {
     process.stderr.write(`Error: ${String(err)}\n`);
     process.exit(1);
