@@ -5,6 +5,9 @@ import { DagInput, DagResult, DagNode, DagEdge, ParsedDependency } from "./types
 
 const MAX_NODES = 50;
 
+/** Object types that are meaningful for documentation (contain code or data structures). */
+const RELEVANT_TYPES = new Set(["CLAS", "INTF", "PROG", "FUGR", "TABL", "DDLS"]);
+
 function log(msg: string): void {
   process.stderr.write(`[dag-builder] ${msg}\n`);
 }
@@ -92,26 +95,32 @@ async function traverse(
     log(`  Found ${deps.length} dependencies for ${key}`);
 
     for (const dep of deps) {
-      edges.push({ from: key, to: dep.objectName, references: dep.members });
+      const isNew = !nodes.has(dep.objectName) && !visited.has(dep.objectName);
 
-      if (!nodes.has(dep.objectName) && !visited.has(dep.objectName)) {
+      if (isNew) {
         if (isCustomObject(dep.objectName)) {
-          // Custom: resolve type and enqueue for recursive traversal
+          // Custom: resolve type, only traverse if relevant
           const resolvedType = await resolveType(client, dep, errors);
+          if (!RELEVANT_TYPES.has(resolvedType)) continue;
           queue.push({ name: dep.objectName, type: resolvedType });
         } else {
-          // Standard: record as leaf node, don't fetch source
+          // Standard: only include if parser identified a relevant type
+          if (!RELEVANT_TYPES.has(dep.objectType)) continue;
           nodes.set(dep.objectName, {
             name: dep.objectName,
-            type: dep.objectType || "UNKNOWN",
+            type: dep.objectType,
             isCustom: false,
             sourceAvailable: false,
             usedBy: [],
           });
         }
+      } else if (!nodes.has(dep.objectName)) {
+        // Already visited or queued but not yet a relevant type — skip edge
+        continue;
       }
 
-      // Update usedBy on existing nodes
+      edges.push({ from: key, to: dep.objectName, references: dep.members });
+
       const depNode = nodes.get(dep.objectName);
       if (depNode && !depNode.usedBy.includes(key)) {
         depNode.usedBy.push(key);
