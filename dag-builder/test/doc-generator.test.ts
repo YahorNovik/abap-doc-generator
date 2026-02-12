@@ -90,14 +90,14 @@ describe("buildDocPrompt", () => {
     expect(userMsg.content).toContain("VALIDATE (method)");
   });
 
-  it("should include all required doc sections for class", () => {
+  it("should include all required doc sections in system prompt", () => {
     const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
-    const userMsg = messages.find((m) => m.role === "user")!;
-    expect(userMsg.content).toContain("Overview");
-    expect(userMsg.content).toContain("Methods");
-    expect(userMsg.content).toContain("Dependencies");
-    expect(userMsg.content).toContain("Where-Used");
-    expect(userMsg.content).toContain("Notes");
+    const sysMsg = messages.find((m) => m.role === "system")!;
+    expect(sysMsg.content).toContain("Overview");
+    expect(sysMsg.content).toContain("Methods");
+    expect(sysMsg.content).toContain("Dependencies");
+    expect(sysMsg.content).toContain("Where-Used");
+    expect(sysMsg.content).toContain("Notes");
   });
 
   it("should have system message with object type context", () => {
@@ -108,19 +108,19 @@ describe("buildDocPrompt", () => {
     expect(sysMsg.content).toContain("ZCL_ROOT");
   });
 
-  it("should include word limit from template", () => {
+  it("should include word limit in system prompt", () => {
     const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
-    const userMsg = messages.find((m) => m.role === "user")!;
-    expect(userMsg.content).toContain("under 3000 words");
+    const sysMsg = messages.find((m) => m.role === "system")!;
+    expect(sysMsg.content).toContain("under 3000 words");
   });
 
-  it("should use minimal template sections when provided", () => {
+  it("should use minimal template sections in system prompt", () => {
     const messages = buildDocPrompt(rootNode, rootSource, [], minimalTemplate);
-    const userMsg = messages.find((m) => m.role === "user")!;
-    expect(userMsg.content).toContain("Overview");
-    expect(userMsg.content).toContain("Methods");
-    expect(userMsg.content).not.toContain("Dependencies");
-    expect(userMsg.content).toContain("under 1000 words");
+    const sysMsg = messages.find((m) => m.role === "system")!;
+    expect(sysMsg.content).toContain("Overview");
+    expect(sysMsg.content).toContain("Methods");
+    expect(sysMsg.content).not.toContain("Dependencies");
+    expect(sysMsg.content).toContain("under 1000 words");
   });
 });
 
