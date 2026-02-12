@@ -55,11 +55,12 @@ public class DagRunner {
                               String objectName, String objectType,
                               String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                               String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                              String mode,
                               Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildDocInputJson(systemUrl, client, username, password, objectName, objectType,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
-            docProvider, docApiKey, docModel, docBaseUrl);
+            docProvider, docApiKey, docModel, docBaseUrl, mode);
         return runScript(input, progressCallback);
     }
 
@@ -115,7 +116,8 @@ public class DagRunner {
     private static String buildDocInputJson(String systemUrl, String client, String username, String password,
                                              String objectName, String objectType,
                                              String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
-                                             String docProvider, String docApiKey, String docModel, String docBaseUrl) {
+                                             String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                                             String mode) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-doc\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -139,7 +141,11 @@ public class DagRunner {
         if (docBaseUrl != null && !docBaseUrl.isEmpty()) {
             sb.append(",\"baseUrl\":\"").append(escapeJson(docBaseUrl)).append("\"");
         }
-        sb.append("}}");
+        sb.append("}");
+        if (mode != null && !mode.isEmpty()) {
+            sb.append(",\"mode\":\"").append(escapeJson(mode)).append("\"");
+        }
+        sb.append("}");
         return sb.toString();
     }
 

@@ -74,6 +74,7 @@ export interface DocInput {
   objectType: string;
   summaryLlm: LlmConfig;
   docLlm: LlmConfig;
+  mode?: "realtime" | "batch";
 }
 
 export interface DocResult {
@@ -82,4 +83,19 @@ export interface DocResult {
   summaries: Record<string, string>;
   tokenUsage: { summaryTokens: number; docTokens: number };
   errors: string[];
+}
+
+// ─── Batch types ───
+
+export interface BatchRequest {
+  id: string;
+  messages: LlmMessage[];
+}
+
+export interface BatchStatus {
+  id: string;
+  state: "pending" | "running" | "completed" | "failed";
+  completedCount: number;
+  totalCount: number;
+  outputFileId?: string;
 }

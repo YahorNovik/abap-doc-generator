@@ -1,7 +1,7 @@
 import { buildDag, createConnectedClient, fetchSourceForNodes } from "./dag-builder";
-import { callLlm } from "./llm-client";
+import { callLlm, runBatch } from "./llm-client";
 import { buildSummaryPrompt, buildDocPrompt } from "./prompts";
-import { DocInput, DocResult, DagResult, DagEdge } from "./types";
+import { DocInput, DocResult, DagResult, DagEdge, DagNode, LlmConfig, BatchRequest } from "./types";
 
 function log(msg: string): void {
   process.stderr.write(`[doc-generator] ${msg}\n`);
@@ -54,46 +54,24 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
     edgesByFrom.get(edge.from)!.push(edge);
   }
 
-  // 3. Walk topological order (leaves first), summarize each non-root node
   const rootName = dagResult.root;
   const topoOrder = dagResult.topologicalOrder;
   const nodeMap = new Map(dagResult.nodes.map((n) => [n.name, n]));
 
-  for (let i = 0; i < topoOrder.length; i++) {
-    const name = topoOrder[i];
-    const node = nodeMap.get(name);
-    if (!node) continue;
+  // 3. Summarize dependencies (batch or realtime)
+  const useBatch = input.mode === "batch"
+    && (input.summaryLlm.provider === "openai" || input.summaryLlm.provider === "gemini");
 
-    const source = sources.get(name);
-    if (!source) {
-      errors.push(`No source available for ${name}, skipping summarization.`);
-      continue;
-    }
-
-    const isRoot = name === rootName;
-
-    if (!isRoot) {
-      // Summarize dependency with cheap model
-      log(`[${i + 1}/${topoOrder.length}] Summarizing ${name}...`);
-
-      // Gather summaries of this node's own dependencies
-      const edges = edgesByFrom.get(name) ?? [];
-      const depSummaries = edges
-        .filter((e) => summaries[e.to])
-        .map((e) => ({ name: e.to, summary: summaries[e.to] }));
-
-      const messages = buildSummaryPrompt(node, source, depSummaries);
-
-      try {
-        const response = await callLlm(input.summaryLlm, messages);
-        summaries[name] = response.content;
-        summaryTokens += response.usage.promptTokens + response.usage.completionTokens;
-        log(`  Summary: ${response.content.substring(0, 80)}...`);
-      } catch (err) {
-        errors.push(`Failed to summarize ${name}: ${String(err)}`);
-        summaries[name] = `[Summary unavailable: ${String(err)}]`;
-      }
-    }
+  if (useBatch) {
+    log("Using batch mode for summarization...");
+    summaryTokens = await summarizeWithBatch(
+      input.summaryLlm, topoOrder, rootName, nodeMap, sources, edgesByFrom, summaries, errors,
+    );
+  } else {
+    log("Using realtime mode for summarization...");
+    summaryTokens = await summarizeRealtime(
+      input.summaryLlm, topoOrder, rootName, nodeMap, sources, edgesByFrom, summaries, errors,
+    );
   }
 
   // 4. Generate full documentation for root
@@ -149,4 +127,156 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
       errors,
     };
   }
+}
+
+// ─── Realtime summarization (sequential, one call per node) ───
+
+async function summarizeRealtime(
+  config: LlmConfig,
+  topoOrder: string[],
+  rootName: string,
+  nodeMap: Map<string, DagNode>,
+  sources: Map<string, string>,
+  edgesByFrom: Map<string, DagEdge[]>,
+  summaries: Record<string, string>,
+  errors: string[],
+): Promise<number> {
+  let totalTokens = 0;
+
+  for (let i = 0; i < topoOrder.length; i++) {
+    const name = topoOrder[i];
+    if (name === rootName) continue;
+
+    const node = nodeMap.get(name);
+    if (!node) continue;
+
+    const source = sources.get(name);
+    if (!source) {
+      errors.push(`No source available for ${name}, skipping summarization.`);
+      continue;
+    }
+
+    log(`[${i + 1}/${topoOrder.length}] Summarizing ${name}...`);
+
+    const edges = edgesByFrom.get(name) ?? [];
+    const depSummaries = edges
+      .filter((e) => summaries[e.to])
+      .map((e) => ({ name: e.to, summary: summaries[e.to] }));
+
+    const messages = buildSummaryPrompt(node, source, depSummaries);
+
+    try {
+      const response = await callLlm(config, messages);
+      summaries[name] = response.content;
+      totalTokens += response.usage.promptTokens + response.usage.completionTokens;
+      log(`  Summary: ${response.content.substring(0, 80)}...`);
+    } catch (err) {
+      errors.push(`Failed to summarize ${name}: ${String(err)}`);
+      summaries[name] = `[Summary unavailable: ${String(err)}]`;
+    }
+  }
+
+  return totalTokens;
+}
+
+// ─── Batch summarization (by topological level) ───
+
+async function summarizeWithBatch(
+  config: LlmConfig,
+  topoOrder: string[],
+  rootName: string,
+  nodeMap: Map<string, DagNode>,
+  sources: Map<string, string>,
+  edgesByFrom: Map<string, DagEdge[]>,
+  summaries: Record<string, string>,
+  errors: string[],
+): Promise<number> {
+  let totalTokens = 0;
+
+  // Compute topological levels
+  const levels = computeTopologicalLevels(topoOrder, edgesByFrom, rootName);
+  const maxLevel = Math.max(0, ...Array.from(levels.values()));
+
+  log(`Computed ${maxLevel + 1} topological levels for batch processing.`);
+
+  for (let level = 0; level <= maxLevel; level++) {
+    const nodesAtLevel = topoOrder.filter((n) => levels.get(n) === level);
+
+    if (nodesAtLevel.length === 0) continue;
+
+    log(`Level ${level}: ${nodesAtLevel.length} nodes — submitting batch...`);
+
+    // Build batch requests for this level
+    const batchRequests: BatchRequest[] = [];
+    for (const name of nodesAtLevel) {
+      const node = nodeMap.get(name);
+      if (!node) continue;
+
+      const source = sources.get(name);
+      if (!source) {
+        errors.push(`No source available for ${name}, skipping.`);
+        continue;
+      }
+
+      const edges = edgesByFrom.get(name) ?? [];
+      const depSummaries = edges
+        .filter((e) => summaries[e.to])
+        .map((e) => ({ name: e.to, summary: summaries[e.to] }));
+
+      const messages = buildSummaryPrompt(node, source, depSummaries);
+      batchRequests.push({ id: name, messages });
+    }
+
+    if (batchRequests.length === 0) continue;
+
+    // Submit batch and wait for results
+    try {
+      const results = await runBatch(config, batchRequests);
+
+      for (const [name, response] of results) {
+        summaries[name] = response.content;
+        totalTokens += response.usage.promptTokens + response.usage.completionTokens;
+      }
+
+      log(`Level ${level}: ${results.size} summaries received.`);
+    } catch (err) {
+      errors.push(`Batch failed for level ${level}: ${String(err)}`);
+      // Mark all nodes at this level as failed
+      for (const req of batchRequests) {
+        summaries[req.id] = `[Batch summary unavailable: ${String(err)}]`;
+      }
+    }
+  }
+
+  return totalTokens;
+}
+
+/**
+ * Computes topological levels for batch grouping.
+ * Level 0 = leaves (no deps in DAG), level N = depends only on levels < N.
+ * Root is excluded.
+ */
+export function computeTopologicalLevels(
+  topoOrder: string[],
+  edgesByFrom: Map<string, DagEdge[]>,
+  rootName: string,
+): Map<string, number> {
+  const levels = new Map<string, number>();
+
+  for (const name of topoOrder) {
+    if (name === rootName) continue;
+
+    const edges = edgesByFrom.get(name) ?? [];
+    const depLevels = edges
+      .map((e) => levels.get(e.to))
+      .filter((l): l is number => l !== undefined);
+
+    if (depLevels.length === 0) {
+      levels.set(name, 0);
+    } else {
+      levels.set(name, Math.max(...depLevels) + 1);
+    }
+  }
+
+  return levels;
 }

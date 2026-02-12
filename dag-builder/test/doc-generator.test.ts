@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildSummaryPrompt, buildDocPrompt } from "../src/prompts";
+import { computeTopologicalLevels } from "../src/doc-generator";
 import { DagNode, DagEdge, LlmMessage } from "../src/types";
 
 // We test the prompt builders and the documentation flow logic directly.
@@ -194,5 +195,79 @@ describe("bottom-up summary accumulation", () => {
     expect(userMsg.content).toContain("Provides formatting and conversion utilities.");
     expect(userMsg.content).toContain("VALIDATE (method)");
     expect(userMsg.content).toContain("CONVERT (method)");
+  });
+});
+
+describe("computeTopologicalLevels", () => {
+  const edges: DagEdge[] = [
+    { from: "ZCL_ROOT", to: "ZCL_HELPER", references: [{ memberName: "VALIDATE", memberType: "method" }] },
+    { from: "ZCL_ROOT", to: "ZCL_UTILS", references: [{ memberName: "CONVERT", memberType: "method" }] },
+    { from: "ZCL_HELPER", to: "ZCL_UTILS", references: [{ memberName: "FORMAT", memberType: "method" }] },
+  ];
+
+  const edgesByFrom = new Map<string, DagEdge[]>();
+  for (const edge of edges) {
+    if (!edgesByFrom.has(edge.from)) edgesByFrom.set(edge.from, []);
+    edgesByFrom.get(edge.from)!.push(edge);
+  }
+
+  it("should assign level 0 to leaf nodes", () => {
+    const topoOrder = ["ZCL_UTILS", "ZCL_HELPER", "ZCL_ROOT"];
+    const levels = computeTopologicalLevels(topoOrder, edgesByFrom, "ZCL_ROOT");
+
+    expect(levels.get("ZCL_UTILS")).toBe(0);
+  });
+
+  it("should assign level 1 to nodes depending on leaves", () => {
+    const topoOrder = ["ZCL_UTILS", "ZCL_HELPER", "ZCL_ROOT"];
+    const levels = computeTopologicalLevels(topoOrder, edgesByFrom, "ZCL_ROOT");
+
+    expect(levels.get("ZCL_HELPER")).toBe(1);
+  });
+
+  it("should exclude root from levels", () => {
+    const topoOrder = ["ZCL_UTILS", "ZCL_HELPER", "ZCL_ROOT"];
+    const levels = computeTopologicalLevels(topoOrder, edgesByFrom, "ZCL_ROOT");
+
+    expect(levels.has("ZCL_ROOT")).toBe(false);
+  });
+
+  it("should handle diamond dependencies correctly", () => {
+    // A depends on B and C, B depends on D, C depends on D
+    const diamondEdges: DagEdge[] = [
+      { from: "A", to: "B", references: [] },
+      { from: "A", to: "C", references: [] },
+      { from: "B", to: "D", references: [] },
+      { from: "C", to: "D", references: [] },
+    ];
+
+    const diamondByFrom = new Map<string, DagEdge[]>();
+    for (const e of diamondEdges) {
+      if (!diamondByFrom.has(e.from)) diamondByFrom.set(e.from, []);
+      diamondByFrom.get(e.from)!.push(e);
+    }
+
+    const topoOrder = ["D", "B", "C", "A"];
+    const levels = computeTopologicalLevels(topoOrder, diamondByFrom, "A");
+
+    expect(levels.get("D")).toBe(0);  // leaf
+    expect(levels.get("B")).toBe(1);  // depends on D (level 0)
+    expect(levels.get("C")).toBe(1);  // depends on D (level 0)
+    // A is root, excluded
+  });
+
+  it("should group same-level nodes for batching", () => {
+    const topoOrder = ["ZCL_UTILS", "ZCL_HELPER", "ZCL_ROOT"];
+    const levels = computeTopologicalLevels(topoOrder, edgesByFrom, "ZCL_ROOT");
+
+    // Group by level
+    const groups = new Map<number, string[]>();
+    for (const [name, level] of levels) {
+      if (!groups.has(level)) groups.set(level, []);
+      groups.get(level)!.push(name);
+    }
+
+    expect(groups.get(0)).toEqual(["ZCL_UTILS"]);
+    expect(groups.get(1)).toEqual(["ZCL_HELPER"]);
   });
 });

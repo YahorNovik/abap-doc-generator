@@ -28,6 +28,9 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
     public static final String PREF_DOC_MODEL = "docLlmModel";
     public static final String PREF_DOC_BASE_URL = "docLlmBaseUrl";
 
+    // Processing mode
+    public static final String PREF_MODE = "docMode";
+
     private static final String[][] PROVIDER_OPTIONS = {
         { "Gemini", "gemini" },
         { "OpenAI", "openai" },
@@ -59,6 +62,12 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         addField(new StringFieldEditor(PREF_DOC_API_KEY, "Doc LLM API Key:", getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_DOC_MODEL, "Doc LLM Model:", getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_DOC_BASE_URL, "Doc LLM Base URL (optional):", getFieldEditorParent()));
+
+        // Mode
+        addField(new ComboFieldEditor(PREF_MODE, "Processing Mode:", new String[][] {
+            { "Real-time (instant, full price)", "realtime" },
+            { "Batch (async, 50% discount)", "batch" },
+        }, getFieldEditorParent()));
     }
 
     @Override
