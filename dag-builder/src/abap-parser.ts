@@ -123,7 +123,7 @@ function processReference(
     const ooName = ref.extra?.ooName;
     if (!ooName || ooName.toUpperCase() === selfName.toUpperCase()) return;
 
-    getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? "Void");
+    getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? inferTypeFromName(ooName));
     return;
   }
 
@@ -132,7 +132,7 @@ function processReference(
     const ooName = ref.extra?.ooName;
     if (!ooName || ooName.toUpperCase() === selfName.toUpperCase()) return;
 
-    const dep = getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? "Void");
+    const dep = getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? inferTypeFromName(ooName));
     const memberName = ref.position.getName();
     if (memberName && !dep.members.some((m) => m.memberName === memberName && m.memberType === "method")) {
       dep.members.push({
@@ -149,7 +149,7 @@ function processReference(
     const ooName = ref.extra?.ooName;
     if (!ooName || ooName.toUpperCase() === selfName.toUpperCase()) return;
 
-    const dep = getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? "Void");
+    const dep = getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? inferTypeFromName(ooName));
     if (!dep.members.some((m) => m.memberType === "constructor")) {
       dep.members.push({
         memberName: "CONSTRUCTOR",
@@ -256,6 +256,13 @@ function collectAstReferences(
 }
 
 // ─── Helpers ───
+
+function inferTypeFromName(name: string): string {
+  const upper = name.toUpperCase();
+  if (upper.match(/^[YZ]?IF_/) || upper.match(/^IF_/)) return "INTF";
+  if (upper.match(/^[YZ]?C[LX]_/) || upper.match(/^CL_/) || upper.match(/^CX_/)) return "CLAS";
+  return "CLAS";
+}
 
 function getOrCreateDep(
   depMap: Map<string, ParsedDependency>,
