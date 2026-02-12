@@ -52,8 +52,9 @@ async function traverse(
   const nodes = new Map<string, DagNode>();
   const edges: DagEdge[] = [];
   const visited = new Set<string>();
-  const queue: Array<{ name: string; type: string }> = [{ name: rootName, type: rootType }];
+  const queue: Array<{ name: string; type: string; depth: number }> = [{ name: rootName, type: rootType, depth: 0 }];
   const pendingEdges: Array<{ from: string; to: string; references: DagEdge["references"] }> = [];
+  const nodeDepth = new Map<string, number>();
 
   while (queue.length > 0) {
     const current = queue.shift()!;
@@ -68,7 +69,8 @@ async function traverse(
       break;
     }
 
-    log(`[${nodes.size + 1}/${MAX_NODES}] Fetching ${key}...`);
+    log(`[${nodes.size + 1}/${MAX_NODES}] Fetching ${key} (depth ${current.depth})...`);
+    nodeDepth.set(key, current.depth);
 
     // Fetch source for custom objects (needed for dependency parsing)
     let source: string;
@@ -113,11 +115,12 @@ async function traverse(
           // Custom: resolve type, only traverse if relevant
           const resolvedType = await resolveType(client, dep, errors);
           if (!RELEVANT_TYPES.has(resolvedType)) continue;
-          queue.push({ name: dep.objectName, type: resolvedType });
+          queue.push({ name: dep.objectName, type: resolvedType, depth: current.depth + 1 });
           // Defer edge — node will be created when dequeued
           deferredEdges.push({ from: key, to: dep.objectName, references: dep.members });
         } else {
-          // Standard: only include if parser identified a relevant type
+          // Standard: only include as leaf nodes for the root object (depth 0)
+          if (current.depth > 0) continue;
           if (!RELEVANT_TYPES.has(dep.objectType)) continue;
           nodes.set(dep.objectName, {
             name: dep.objectName,
