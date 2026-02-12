@@ -53,6 +53,7 @@ async function traverse(
   const edges: DagEdge[] = [];
   const visited = new Set<string>();
   const queue: Array<{ name: string; type: string }> = [{ name: rootName, type: rootType }];
+  const pendingEdges: Array<{ from: string; to: string; references: DagEdge["references"] }> = [];
 
   while (queue.length > 0) {
     const current = queue.shift()!;
@@ -98,7 +99,13 @@ async function traverse(
 
     log(`  Found ${deps.length} dependencies for ${key}`);
 
+    // Collect deferred edges for custom deps that are queued but not yet nodes
+    const deferredEdges: Array<{ from: string; to: string; references: typeof deps[0]["members"] }> = [];
+
     for (const dep of deps) {
+      // Skip names with ~ (interface component references like ZIF_FOO~TY_BAR)
+      if (dep.objectName.includes("~")) continue;
+
       const isNew = !nodes.has(dep.objectName) && !visited.has(dep.objectName);
 
       if (isNew) {
@@ -107,6 +114,8 @@ async function traverse(
           const resolvedType = await resolveType(client, dep, errors);
           if (!RELEVANT_TYPES.has(resolvedType)) continue;
           queue.push({ name: dep.objectName, type: resolvedType });
+          // Defer edge — node will be created when dequeued
+          deferredEdges.push({ from: key, to: dep.objectName, references: dep.members });
         } else {
           // Standard: only include if parser identified a relevant type
           if (!RELEVANT_TYPES.has(dep.objectType)) continue;
@@ -117,18 +126,31 @@ async function traverse(
             sourceAvailable: false,
             usedBy: [],
           });
+          edges.push({ from: key, to: dep.objectName, references: dep.members });
         }
       } else if (!nodes.has(dep.objectName)) {
-        // Already visited or queued but not yet a relevant type — skip edge
-        continue;
+        // Already queued but not yet processed — defer edge
+        deferredEdges.push({ from: key, to: dep.objectName, references: dep.members });
+      } else {
+        edges.push({ from: key, to: dep.objectName, references: dep.members });
       }
-
-      edges.push({ from: key, to: dep.objectName, references: dep.members });
 
       const depNode = nodes.get(dep.objectName);
       if (depNode && !depNode.usedBy.includes(key)) {
         depNode.usedBy.push(key);
       }
+    }
+
+    // Store deferred edges to resolve after traversal
+    for (const de of deferredEdges) {
+      pendingEdges.push(de);
+    }
+  }
+
+  // Resolve deferred edges — only add if the target node was actually created
+  for (const pe of pendingEdges) {
+    if (nodes.has(pe.to)) {
+      edges.push({ from: pe.from, to: pe.to, references: pe.references });
     }
   }
 
@@ -156,8 +178,9 @@ async function resolveType(
   dep: ParsedDependency,
   errors: string[]
 ): Promise<string> {
-  if (dep.objectType === "CLAS" || dep.objectType === "INTF") {
-    return dep.objectType;
+  // Trust INTF from parser; for CLAS, verify via ADT since VoidType may mis-classify
+  if (dep.objectType === "INTF") {
+    return "INTF";
   }
 
   try {
@@ -169,6 +192,9 @@ async function resolveType(
     errors.push(`Failed to resolve type for ${dep.objectName}: ${String(err)}`);
   }
 
+  // Fallback: infer from name pattern
+  const upper = dep.objectName.toUpperCase();
+  if (upper.match(/^[YZ]?IF_/) || upper.match(/^IF_/)) return "INTF";
   return "CLAS";
 }
 

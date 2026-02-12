@@ -167,9 +167,13 @@ function processReference(
     if (!typeName || typeName.toUpperCase() === selfName.toUpperCase()) return;
 
     const upper = typeName.toUpperCase();
-    // Only include if it looks like a class or interface name
-    if (upper.match(/^[YZ]?C[LX]_/) || upper.match(/^[YZ]?IF_/) || upper.match(/^IF_/) || upper.match(/^CL_/) || upper.match(/^CX_/)) {
-      getOrCreateDep(depMap, typeName, ref.extra?.ooType === "INTF" ? "INTF" : "CLAS");
+    // Skip interface component references (e.g. ZIF_FOO~TY_BAR)
+    if (upper.includes("~")) return;
+    // Determine type from name pattern: IF_ prefix → INTF, otherwise CLAS
+    if (upper.match(/^[YZ]?IF_/) || upper.match(/^IF_/)) {
+      getOrCreateDep(depMap, typeName, "INTF");
+    } else if (upper.match(/^[YZ]?C[LX]_/) || upper.match(/^CL_/) || upper.match(/^CX_/)) {
+      getOrCreateDep(depMap, typeName, "CLAS");
     }
     return;
   }
