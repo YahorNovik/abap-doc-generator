@@ -58,4 +58,29 @@ describe("extractDependencies", () => {
     const depNames = deps.map((d) => d.objectName);
     expect(depNames).not.toContain("ZCL_EXAMPLE");
   });
+
+  it("should extract CALL FUNCTION dependencies", () => {
+    const source = readFixture("zcl_with_calls.clas.abap");
+    const deps = extractDependencies(source, "ZCL_WITH_CALLS", "CLAS");
+
+    const depNames = deps.map((d) => d.objectName);
+    expect(depNames).toContain("Z_MY_CUSTOM_FM");
+    expect(depNames).toContain("BAPI_MATERIAL_GETLIST");
+
+    const fmDep = deps.find((d) => d.objectName === "Z_MY_CUSTOM_FM");
+    expect(fmDep).toBeDefined();
+    expect(fmDep!.objectType).toBe("FUGR");
+    expect(fmDep!.members[0].memberType).toBe("form");
+  });
+
+  it("should extract SUBMIT dependencies", () => {
+    const source = readFixture("zcl_with_calls.clas.abap");
+    const deps = extractDependencies(source, "ZCL_WITH_CALLS", "CLAS");
+
+    const depNames = deps.map((d) => d.objectName);
+    expect(depNames).toContain("Z_MY_REPORT");
+
+    const progDep = deps.find((d) => d.objectName === "Z_MY_REPORT");
+    expect(progDep!.objectType).toBe("PROG");
+  });
 });

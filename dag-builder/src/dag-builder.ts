@@ -6,7 +6,11 @@ import { DagInput, DagResult, DagNode, DagEdge, ParsedDependency } from "./types
 const MAX_NODES = 50;
 
 /** Object types that are meaningful for documentation (contain code or data structures). */
-const RELEVANT_TYPES = new Set(["CLAS", "INTF", "PROG", "FUGR", "TABL", "DDLS"]);
+const RELEVANT_TYPES = new Set([
+  "CLAS", "INTF", "PROG", "FUGR",     // code objects
+  "TABL", "DDLS",                       // data model
+  "DCLS", "DDLX", "BDEF", "SRVD",     // RAP / CDS extensions
+]);
 
 function log(msg: string): void {
   process.stderr.write(`[dag-builder] ${msg}\n`);

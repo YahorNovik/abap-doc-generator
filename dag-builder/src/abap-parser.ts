@@ -6,6 +6,8 @@ import {
   ReferenceType,
   ISpaghettiScope,
   Config,
+  Statements,
+  Expressions,
 } from "@abaplint/core";
 import { ParsedDependency, MemberReference } from "./types";
 import { buildAbapGitFilename } from "./classifier";
@@ -56,7 +58,15 @@ export function extractDependencies(
   const syntaxResult = new SyntaxLogic(reg, obj).run();
   const spaghetti: ISpaghettiScope = syntaxResult.spaghetti;
 
-  return collectDependencies(spaghetti, objectName);
+  const depMap = new Map<string, ParsedDependency>();
+
+  // 1. Collect scope-based references (OO, types, tables)
+  collectScopeReferences(spaghetti, objectName, depMap);
+
+  // 2. Collect AST-based references (CALL FUNCTION, PERFORM, SUBMIT)
+  collectAstReferences(obj, objectName, depMap);
+
+  return Array.from(depMap.values());
 }
 
 function findAbapObject(reg: Registry, objectName: string): ABAPObject | undefined {
@@ -68,16 +78,15 @@ function findAbapObject(reg: Registry, objectName: string): ABAPObject | undefin
   return undefined;
 }
 
-function collectDependencies(
+// ─── Scope-based reference collection (OO, types, tables) ───
+
+function collectScopeReferences(
   spaghetti: ISpaghettiScope,
-  selfName: string
-): ParsedDependency[] {
-  const depMap = new Map<string, ParsedDependency>();
+  selfName: string,
+  depMap: Map<string, ParsedDependency>
+): void {
   const top = spaghetti.getTop() as ScopeNode;
-
   traverseScope(top, selfName, depMap);
-
-  return Array.from(depMap.values());
 }
 
 function traverseScope(
@@ -114,7 +123,7 @@ function processReference(
     const ooName = ref.extra?.ooName;
     if (!ooName || ooName.toUpperCase() === selfName.toUpperCase()) return;
 
-    const dep = getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? "Void");
+    getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? "Void");
     return;
   }
 
@@ -169,7 +178,6 @@ function processReference(
   }
 
   // Void type references (TYPE REF TO unknown_class, TYPE unknown_table, etc.)
-  // These don't have ooName set — the position name IS the type name
   if (refType === ReferenceType.VoidType) {
     const typeName = ref.extra?.ooName ?? ref.position.getName();
     if (!typeName || typeName.toUpperCase() === selfName.toUpperCase()) return;
@@ -183,10 +191,79 @@ function processReference(
     const tableName = ref.position.getName();
     if (!tableName) return;
 
-    const dep = getOrCreateDep(depMap, tableName, "TABL");
+    getOrCreateDep(depMap, tableName, "TABL");
     return;
   }
 }
+
+// ─── AST-based reference collection (CALL FUNCTION, PERFORM, SUBMIT) ───
+
+function collectAstReferences(
+  obj: ABAPObject,
+  selfName: string,
+  depMap: Map<string, ParsedDependency>
+): void {
+  for (const file of obj.getABAPFiles()) {
+    const structure = file.getStructure();
+    if (!structure) continue;
+
+    // CALL FUNCTION 'FM_NAME'
+    for (const stmt of structure.findAllStatements(Statements.CallFunction)) {
+      const nameExpr = stmt.findFirstExpression(Expressions.FunctionName);
+      if (!nameExpr) continue;
+
+      const constant = nameExpr.findFirstExpression(Expressions.Constant);
+      if (!constant) continue; // skip dynamic calls
+
+      const fmName = nameExpr.concatTokens().replace(/'/g, "").toUpperCase();
+      if (!fmName || fmName === selfName.toUpperCase()) continue;
+
+      const dep = getOrCreateDep(depMap, fmName, "FUGR");
+      if (!dep.members.some((m) => m.memberName === fmName && m.memberType === "form")) {
+        dep.members.push({
+          memberName: fmName,
+          memberType: "form",
+          line: stmt.getStart().getRow(),
+        });
+      }
+    }
+
+    // PERFORM form_name IN PROGRAM program_name
+    for (const stmt of structure.findAllStatements(Statements.Perform)) {
+      // Only external PERFORMs (with IN PROGRAM or program name in parentheses)
+      const includeName = stmt.findDirectExpression(Expressions.IncludeName);
+      if (!includeName) continue;
+
+      const progName = includeName.concatTokens().toUpperCase();
+      if (!progName || progName === selfName.toUpperCase()) continue;
+
+      const formExpr = stmt.findFirstExpression(Expressions.FormName);
+      const formName = formExpr?.concatTokens().toUpperCase() ?? "UNKNOWN";
+
+      const dep = getOrCreateDep(depMap, progName, "PROG");
+      if (!dep.members.some((m) => m.memberName === formName && m.memberType === "form")) {
+        dep.members.push({
+          memberName: formName,
+          memberType: "form",
+          line: stmt.getStart().getRow(),
+        });
+      }
+    }
+
+    // SUBMIT program_name
+    for (const stmt of structure.findAllStatements(Statements.Submit)) {
+      const progExpr = stmt.findFirstExpression(Expressions.IncludeName);
+      if (!progExpr) continue; // skip dynamic
+
+      const progName = progExpr.concatTokens().toUpperCase();
+      if (!progName || progName === selfName.toUpperCase()) continue;
+
+      getOrCreateDep(depMap, progName, "PROG");
+    }
+  }
+}
+
+// ─── Helpers ───
 
 function getOrCreateDep(
   depMap: Map<string, ParsedDependency>,
@@ -214,6 +291,10 @@ function mapOoType(ooType: string): string {
       return "INTF";
     case "TABL":
       return "TABL";
+    case "FUGR":
+      return "FUGR";
+    case "PROG":
+      return "PROG";
     default:
       return "UNKNOWN";
   }
