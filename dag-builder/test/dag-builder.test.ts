@@ -3,27 +3,26 @@ import { DagResult, DagNode, DagEdge } from "../src/types";
 
 // Since dag-builder.ts requires a live SAP connection, we test the
 // topological sort and DAG structure logic with mock data.
+// Only custom (Z/Y) objects appear in the DAG — standard objects are excluded.
 
 function buildMockDag(): DagResult {
   const nodes: DagNode[] = [
     { name: "ZCL_ROOT", type: "CLAS", isCustom: true, sourceAvailable: true, usedBy: [] },
     { name: "ZCL_HELPER", type: "CLAS", isCustom: true, sourceAvailable: true, usedBy: ["ZCL_ROOT"] },
     { name: "ZCL_UTILS", type: "CLAS", isCustom: true, sourceAvailable: true, usedBy: ["ZCL_ROOT", "ZCL_HELPER"] },
-    { name: "CL_STANDARD", type: "CLAS", isCustom: false, sourceAvailable: false, usedBy: ["ZCL_UTILS"] },
   ];
 
   const edges: DagEdge[] = [
     { from: "ZCL_ROOT", to: "ZCL_HELPER", references: [{ memberName: "VALIDATE", memberType: "method" }] },
     { from: "ZCL_ROOT", to: "ZCL_UTILS", references: [{ memberName: "CONVERT", memberType: "method" }] },
     { from: "ZCL_HELPER", to: "ZCL_UTILS", references: [{ memberName: "FORMAT", memberType: "method" }] },
-    { from: "ZCL_UTILS", to: "CL_STANDARD", references: [{ memberName: "GET_INSTANCE", memberType: "method" }] },
   ];
 
   return {
     root: "ZCL_ROOT",
     nodes,
     edges,
-    topologicalOrder: ["CL_STANDARD", "ZCL_UTILS", "ZCL_HELPER", "ZCL_ROOT"],
+    topologicalOrder: ["ZCL_UTILS", "ZCL_HELPER", "ZCL_ROOT"],
     errors: [],
   };
 }
@@ -36,15 +35,12 @@ describe("DAG structure", () => {
 
   it("should have correct node count", () => {
     const dag = buildMockDag();
-    expect(dag.nodes).toHaveLength(4);
+    expect(dag.nodes).toHaveLength(3);
   });
 
-  it("should distinguish custom and standard nodes", () => {
+  it("should only contain custom objects", () => {
     const dag = buildMockDag();
-    const customNodes = dag.nodes.filter((n) => n.isCustom);
-    const standardNodes = dag.nodes.filter((n) => !n.isCustom);
-    expect(customNodes).toHaveLength(3);
-    expect(standardNodes).toHaveLength(1);
+    expect(dag.nodes.every((n) => n.isCustom)).toBe(true);
   });
 
   it("should have correct edge references", () => {
@@ -58,9 +54,7 @@ describe("DAG structure", () => {
     const dag = buildMockDag();
     const order = dag.topologicalOrder;
 
-    // CL_STANDARD is a leaf (no deps) -> should come first
-    expect(order.indexOf("CL_STANDARD")).toBeLessThan(order.indexOf("ZCL_UTILS"));
-    // ZCL_UTILS depends on CL_STANDARD -> comes after
+    // ZCL_UTILS is a leaf (no custom deps) -> should come first
     expect(order.indexOf("ZCL_UTILS")).toBeLessThan(order.indexOf("ZCL_HELPER"));
     // ZCL_ROOT depends on everything -> comes last
     expect(order.indexOf("ZCL_ROOT")).toBe(order.length - 1);
@@ -73,11 +67,8 @@ describe("DAG structure", () => {
     expect(utils!.usedBy).toContain("ZCL_HELPER");
   });
 
-  it("should mark standard objects as sourceAvailable=false", () => {
+  it("should mark all custom objects as sourceAvailable=true", () => {
     const dag = buildMockDag();
-    const standard = dag.nodes.find((n) => n.name === "CL_STANDARD");
-    expect(standard!.sourceAvailable).toBe(false);
-    const custom = dag.nodes.find((n) => n.name === "ZCL_ROOT");
-    expect(custom!.sourceAvailable).toBe(true);
+    expect(dag.nodes.every((n) => n.sourceAvailable)).toBe(true);
   });
 });

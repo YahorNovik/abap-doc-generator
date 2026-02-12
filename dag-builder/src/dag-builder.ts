@@ -111,26 +111,14 @@ async function traverse(
       const isNew = !nodes.has(dep.objectName) && !visited.has(dep.objectName);
 
       if (isNew) {
-        if (isCustomObject(dep.objectName)) {
-          // Custom: resolve type, only traverse if relevant
-          const resolvedType = await resolveType(client, dep, errors);
-          if (!RELEVANT_TYPES.has(resolvedType)) continue;
-          queue.push({ name: dep.objectName, type: resolvedType, depth: current.depth + 1 });
-          // Defer edge — node will be created when dequeued
-          deferredEdges.push({ from: key, to: dep.objectName, references: dep.members });
-        } else {
-          // Standard: only include as leaf nodes for the root object (depth 0)
-          if (current.depth > 0) continue;
-          if (!RELEVANT_TYPES.has(dep.objectType)) continue;
-          nodes.set(dep.objectName, {
-            name: dep.objectName,
-            type: dep.objectType,
-            isCustom: false,
-            sourceAvailable: false,
-            usedBy: [],
-          });
-          edges.push({ from: key, to: dep.objectName, references: dep.members });
-        }
+        // Only traverse custom (Z/Y) objects — standard SAP objects are skipped
+        if (!isCustomObject(dep.objectName)) continue;
+
+        const resolvedType = await resolveType(client, dep, errors);
+        if (!RELEVANT_TYPES.has(resolvedType)) continue;
+        queue.push({ name: dep.objectName, type: resolvedType, depth: current.depth + 1 });
+        // Defer edge — node will be created when dequeued
+        deferredEdges.push({ from: key, to: dep.objectName, references: dep.members });
       } else if (!nodes.has(dep.objectName)) {
         // Already queued but not yet processed — defer edge
         deferredEdges.push({ from: key, to: dep.objectName, references: dep.members });
