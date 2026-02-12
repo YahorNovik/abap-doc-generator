@@ -529,12 +529,20 @@ async function getGeminiBatchResults(
 
 const DEFAULT_MAX_ITERATIONS = 10;
 
+/** Extended response from agent loop with iteration stats. */
+export interface AgentLoopResult extends LlmResponse {
+  agentIterations: number;
+  toolCallCount: number;
+}
+
 /**
  * Calls an LLM in an agent loop with tool support.
  * The LLM can request tool calls which are executed via toolExecutor,
  * then results are fed back until the LLM produces a text response.
  *
  * Only the final doc generation step uses this — summarization remains single-shot.
+ *
+ * @param tokenBudget - Max total tokens (prompt+completion) before stopping the loop.
  */
 export async function callLlmAgentLoop(
   config: LlmConfig,
@@ -542,11 +550,13 @@ export async function callLlmAgentLoop(
   tools: ToolDefinition[],
   toolExecutor: ToolExecutor,
   maxIterations: number = DEFAULT_MAX_ITERATIONS,
-): Promise<LlmResponse> {
+  tokenBudget: number = 0,
+): Promise<AgentLoopResult> {
   // openai-compatible may not support function calling — fall back to single call
   if (config.provider === "openai-compatible") {
     log("openai-compatible provider: falling back to single call (no tools)");
-    return callLlm(config, messages);
+    const res = await callLlm(config, messages);
+    return { ...res, agentIterations: 0, toolCallCount: 0 };
   }
 
   const maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS;
@@ -554,6 +564,7 @@ export async function callLlmAgentLoop(
   const conversation: LlmMessage[] = [...messages];
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
+  let toolCallCount = 0;
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     // Call LLM with tools (with retry logic)
@@ -581,17 +592,28 @@ export async function callLlmAgentLoop(
 
     totalPromptTokens += response!.usage.promptTokens;
     totalCompletionTokens += response!.usage.completionTokens;
+    const totalTokens = totalPromptTokens + totalCompletionTokens;
 
     // No tool calls — return text response
     if (response!.toolCalls.length === 0) {
+      log(`Agent loop completed: ${iteration + 1} iteration(s), ${toolCallCount} tool call(s), ${totalTokens} tokens`);
       return {
         content: response!.content ?? "",
         usage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens },
+        agentIterations: iteration + 1,
+        toolCallCount,
       };
     }
 
+    // Check token budget
+    if (tokenBudget > 0 && totalTokens >= tokenBudget) {
+      log(`Token budget exhausted (${totalTokens}/${tokenBudget}), forcing final response`);
+      break;
+    }
+
     // Process tool calls
-    log(`Agent loop iteration ${iteration + 1}: ${response!.toolCalls.length} tool call(s)`);
+    toolCallCount += response!.toolCalls.length;
+    log(`Agent loop iteration ${iteration + 1}: ${response!.toolCalls.length} tool call(s), ${totalTokens} tokens used`);
 
     // Append assistant message with tool calls
     conversation.push({
@@ -617,9 +639,17 @@ export async function callLlmAgentLoop(
     }
   }
 
-  // Max iterations reached — make one final call without tools
-  log(`Agent loop: max iterations (${maxIterations}) reached, forcing final response`);
-  return callLlm(config, conversation);
+  // Max iterations or budget reached — make one final call without tools
+  log(`Agent loop: forcing final response (${toolCallCount} tool calls, ${totalPromptTokens + totalCompletionTokens} tokens)`);
+  const finalRes = await callLlm(config, conversation);
+  totalPromptTokens += finalRes.usage.promptTokens;
+  totalCompletionTokens += finalRes.usage.completionTokens;
+  return {
+    content: finalRes.content,
+    usage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens },
+    agentIterations: maxIterations + 1,
+    toolCallCount,
+  };
 }
 
 // ─── Agent Response Type (internal) ───

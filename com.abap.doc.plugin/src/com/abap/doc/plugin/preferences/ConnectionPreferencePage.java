@@ -2,6 +2,7 @@ package com.abap.doc.plugin.preferences;
 
 import org.eclipse.jface.preference.ComboFieldEditor;
 import org.eclipse.jface.preference.FieldEditorPreferencePage;
+import org.eclipse.jface.preference.IntegerFieldEditor;
 import org.eclipse.jface.preference.StringFieldEditor;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
@@ -31,6 +32,13 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
     // Processing mode
     public static final String PREF_MODE = "docMode";
 
+    // Token budget
+    public static final String PREF_MAX_TOKENS = "maxTotalTokens";
+
+    // Documentation template
+    public static final String PREF_TEMPLATE = "docTemplate";
+    public static final String PREF_TEMPLATE_CUSTOM = "docTemplateCustom";
+
     private static final String[][] PROVIDER_OPTIONS = {
         { "Gemini", "gemini" },
         { "OpenAI", "openai" },
@@ -54,6 +62,14 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         { "GPT-4.1 Nano", "gpt-4.1-nano" },
         { "GPT-4o", "gpt-4o" },
         { "GPT-4o Mini", "gpt-4o-mini" },
+    };
+
+    private static final String[][] TEMPLATE_OPTIONS = {
+        { "Default", "default" },
+        { "Minimal", "minimal" },
+        { "Detailed", "detailed" },
+        { "API Reference", "api-reference" },
+        { "Custom", "custom" },
     };
 
     public ConnectionPreferencePage() {
@@ -87,6 +103,16 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
             { "Real-time (instant, full price)", "realtime" },
             { "Batch (async, 50% discount)", "batch" },
         }, getFieldEditorParent()));
+
+        // Token budget
+        IntegerFieldEditor maxTokensField = new IntegerFieldEditor(
+            PREF_MAX_TOKENS, "Max Total Tokens (0 = unlimited):", getFieldEditorParent());
+        maxTokensField.setValidRange(0, 10_000_000);
+        addField(maxTokensField);
+
+        // Documentation template
+        addField(new ComboFieldEditor(PREF_TEMPLATE, "Documentation Template:", TEMPLATE_OPTIONS, getFieldEditorParent()));
+        addField(new StringFieldEditor(PREF_TEMPLATE_CUSTOM, "Custom Template (when Custom selected):", getFieldEditorParent()));
     }
 
     @Override

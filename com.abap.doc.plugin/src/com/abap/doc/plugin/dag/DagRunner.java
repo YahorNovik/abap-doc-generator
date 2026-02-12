@@ -55,12 +55,14 @@ public class DagRunner {
                               String objectName, String objectType,
                               String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                               String docProvider, String docApiKey, String docModel, String docBaseUrl,
-                              String mode,
+                              String mode, int maxTotalTokens,
+                              String templateType, String templateCustom,
                               Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildDocInputJson(systemUrl, client, username, password, objectName, objectType,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
-            docProvider, docApiKey, docModel, docBaseUrl, mode);
+            docProvider, docApiKey, docModel, docBaseUrl, mode, maxTotalTokens,
+            templateType, templateCustom);
         return runScript(input, progressCallback);
     }
 
@@ -117,7 +119,8 @@ public class DagRunner {
                                              String objectName, String objectType,
                                              String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                                              String docProvider, String docApiKey, String docModel, String docBaseUrl,
-                                             String mode) {
+                                             String mode, int maxTotalTokens,
+                                             String templateType, String templateCustom) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-doc\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -144,6 +147,15 @@ public class DagRunner {
         sb.append("}");
         if (mode != null && !mode.isEmpty()) {
             sb.append(",\"mode\":\"").append(escapeJson(mode)).append("\"");
+        }
+        if (maxTotalTokens > 0) {
+            sb.append(",\"maxTotalTokens\":").append(maxTotalTokens);
+        }
+        if (templateType != null && !templateType.isEmpty()) {
+            sb.append(",\"templateType\":\"").append(escapeJson(templateType)).append("\"");
+        }
+        if (templateCustom != null && !templateCustom.isEmpty()) {
+            sb.append(",\"templateCustom\":\"").append(escapeJson(templateCustom)).append("\"");
         }
         sb.append("}");
         return sb.toString();

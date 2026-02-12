@@ -21,5 +21,11 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
 
         // Processing mode default
         store.setDefault(ConnectionPreferencePage.PREF_MODE, "realtime");
+
+        // Token budget default (0 = unlimited)
+        store.setDefault(ConnectionPreferencePage.PREF_MAX_TOKENS, 500000);
+
+        // Documentation template default
+        store.setDefault(ConnectionPreferencePage.PREF_TEMPLATE, "default");
     }
 }

@@ -78,13 +78,22 @@ export interface DocInput {
   summaryLlm: LlmConfig;
   docLlm: LlmConfig;
   mode?: "realtime" | "batch";
+  maxTotalTokens?: number;    // token budget for entire generation
+  templateType?: "default" | "minimal" | "detailed" | "api-reference" | "custom";
+  templateCustom?: string;    // user-provided template text (when templateType === "custom")
 }
 
 export interface DocResult {
   objectName: string;
   documentation: string;
   summaries: Record<string, string>;
-  tokenUsage: { summaryTokens: number; docTokens: number };
+  tokenUsage: {
+    summaryTokens: number;
+    docTokens: number;
+    totalTokens: number;
+    agentIterations: number;
+    toolCalls: number;
+  };
   errors: string[];
 }
 

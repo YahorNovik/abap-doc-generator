@@ -62,6 +62,13 @@ public class GenerateDocHandler extends AbstractHandler {
             mode = "realtime";
         }
 
+        // Token budget
+        int maxTotalTokens = store.getInt(ConnectionPreferencePage.PREF_MAX_TOKENS);
+
+        // Documentation template
+        String templateType = store.getString(ConnectionPreferencePage.PREF_TEMPLATE);
+        String templateCustom = store.getString(ConnectionPreferencePage.PREF_TEMPLATE_CUSTOM);
+
         if (summaryApiKey.isBlank() || summaryModel.isBlank() || docApiKey.isBlank() || docModel.isBlank()) {
             MessageDialog.openError(shell, "ABAP Doc Generator",
                 "Please configure LLM settings in Preferences > ABAP Doc Generator");
@@ -94,6 +101,9 @@ public class GenerateDocHandler extends AbstractHandler {
         final String fObjectName = objectName;
         final String fObjectType = objectType;
         final String fMode = mode;
+        final int fMaxTotalTokens = maxTotalTokens;
+        final String fTemplateType = templateType;
+        final String fTemplateCustom = templateCustom;
 
         Job job = new Job("Generating documentation for " + objectName) {
             @Override
@@ -106,11 +116,15 @@ public class GenerateDocHandler extends AbstractHandler {
                         fObjectName, fObjectType,
                         summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
                         docProvider, docApiKey, docModel, docBaseUrl,
-                        fMode,
+                        fMode, fMaxTotalTokens,
+                        fTemplateType, fTemplateCustom,
                         line -> monitor.subTask(line));
 
                     // Extract documentation field from JSON result
                     String documentation = extractDocumentation(resultJson);
+
+                    // Extract token usage for display
+                    String tokenInfo = extractTokenUsage(resultJson);
 
                     // Write Markdown to temp file and open in editor
                     File tempFile = File.createTempFile("doc-" + fObjectName + "-", ".md");
@@ -124,6 +138,9 @@ public class GenerateDocHandler extends AbstractHandler {
                             IDE.openEditorOnFileStore(page,
                                 org.eclipse.core.filesystem.EFS.getLocalFileSystem()
                                     .fromLocalFile(tempFile));
+                            // Show token usage info
+                            MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                                "Documentation generated for " + fObjectName + "\n\n" + tokenInfo);
                         } catch (Exception e) {
                             MessageDialog.openError(shell, "ABAP Doc Generator",
                                 "Failed to open result: " + e.getMessage());
@@ -179,5 +196,51 @@ public class GenerateDocHandler extends AbstractHandler {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Extracts token usage summary from the JSON result.
+     */
+    private static String extractTokenUsage(String json) {
+        int summaryTokens = extractIntField(json, "summaryTokens");
+        int docTokens = extractIntField(json, "docTokens");
+        int totalTokens = extractIntField(json, "totalTokens");
+        int agentIterations = extractIntField(json, "agentIterations");
+        int toolCalls = extractIntField(json, "toolCalls");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Token Usage:\n");
+        sb.append("  Summary tokens: ").append(String.format("%,d", summaryTokens)).append("\n");
+        sb.append("  Doc tokens: ").append(String.format("%,d", docTokens)).append("\n");
+        sb.append("  Total tokens: ").append(String.format("%,d", totalTokens)).append("\n");
+        if (agentIterations > 0) {
+            sb.append("  Agent iterations: ").append(agentIterations).append("\n");
+        }
+        if (toolCalls > 0) {
+            sb.append("  Tool calls: ").append(toolCalls);
+        }
+        return sb.toString();
+    }
+
+    private static int extractIntField(String json, String field) {
+        String key = "\"" + field + "\":";
+        int start = json.indexOf(key);
+        if (start == -1) return 0;
+        start += key.length();
+        StringBuilder digits = new StringBuilder();
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (Character.isDigit(c)) {
+                digits.append(c);
+            } else if (digits.length() > 0) {
+                break;
+            }
+        }
+        if (digits.length() == 0) return 0;
+        try {
+            return Integer.parseInt(digits.toString());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 }

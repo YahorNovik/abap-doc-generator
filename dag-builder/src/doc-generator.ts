@@ -2,7 +2,10 @@ import { buildDag, createConnectedClient, fetchSourceForNodes } from "./dag-buil
 import { callLlm, callLlmAgentLoop, runBatch } from "./llm-client";
 import { buildSummaryPrompt, buildDocPrompt } from "./prompts";
 import { AGENT_TOOLS } from "./tools";
+import { resolveTemplate } from "./templates";
 import { DocInput, DocResult, DagResult, DagEdge, DagNode, LlmConfig, BatchRequest, ToolCall } from "./types";
+
+const DEFAULT_MAX_ITERATIONS = 10;
 
 function log(msg: string): void {
   process.stderr.write(`[doc-generator] ${msg}\n`);
@@ -81,7 +84,7 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
         objectName: rootName,
         documentation: `# ${rootName}\n\nFailed to generate documentation: source code not available.`,
         summaries,
-        tokenUsage: { summaryTokens, docTokens },
+        tokenUsage: { summaryTokens, docTokens, totalTokens: summaryTokens, agentIterations: 0, toolCalls: 0 },
         errors: [...errors, "Root object source not available."],
       };
     }
@@ -100,7 +103,12 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
         })),
       }));
 
-    const docMessages = buildDocPrompt(rootNode, rootSource, depDetails);
+    // Resolve template and set appropriate maxOutputTokens for doc LLM
+    const template = resolveTemplate(input.templateType, input.templateCustom);
+    const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
+    log(`Using template: ${template.name} (maxWords=${template.maxWords}, maxOutputTokens=${template.maxOutputTokens})`);
+
+    const docMessages = buildDocPrompt(rootNode, rootSource, depDetails, template);
 
     // Tool executor: gives the LLM access to ADT for on-demand source and where-used
     const toolExecutor = async (tc: ToolCall): Promise<string> => {
@@ -131,15 +139,26 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
     };
 
     try {
-      const response = await callLlmAgentLoop(input.docLlm, docMessages, AGENT_TOOLS, toolExecutor);
+      const tokenBudget = input.maxTotalTokens ?? 0;
+      const response = await callLlmAgentLoop(
+        docConfig, docMessages, AGENT_TOOLS, toolExecutor,
+        DEFAULT_MAX_ITERATIONS, tokenBudget > 0 ? tokenBudget - summaryTokens : 0,
+      );
       docTokens = response.usage.promptTokens + response.usage.completionTokens;
-      log("Documentation generated successfully.");
+      const totalTokens = summaryTokens + docTokens;
+      log(`Documentation generated: ${response.agentIterations} iteration(s), ${response.toolCallCount} tool call(s), ${totalTokens} total tokens`);
 
       return {
         objectName: rootName,
         documentation: response.content,
         summaries,
-        tokenUsage: { summaryTokens, docTokens },
+        tokenUsage: {
+          summaryTokens,
+          docTokens,
+          totalTokens,
+          agentIterations: response.agentIterations,
+          toolCalls: response.toolCallCount,
+        },
         errors,
       };
     } catch (err) {
@@ -148,7 +167,7 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
         objectName: rootName,
         documentation: `# ${rootName}\n\nFailed to generate documentation: ${String(err)}`,
         summaries,
-        tokenUsage: { summaryTokens, docTokens },
+        tokenUsage: { summaryTokens, docTokens, totalTokens: summaryTokens + docTokens, agentIterations: 0, toolCalls: 0 },
         errors,
       };
     }

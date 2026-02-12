@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildSummaryPrompt, buildDocPrompt } from "../src/prompts";
 import { computeTopologicalLevels } from "../src/doc-generator";
 import { DagNode, DagEdge, LlmMessage } from "../src/types";
+import { TEMPLATES, resolveTemplate } from "../src/templates";
+
+const defaultTemplate = TEMPLATES["default"];
 
 // We test the prompt builders and the documentation flow logic directly.
 // The actual generateDocumentation() requires a live SAP connection,
@@ -64,7 +67,7 @@ describe("buildDocPrompt", () => {
   const rootSource = "CLASS zcl_root DEFINITION.\n  PUBLIC SECTION.\n    METHODS run.\nENDCLASS.";
 
   it("should include root object name and source", () => {
-    const messages = buildDocPrompt(rootNode, rootSource, []);
+    const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
     const userMsg = messages.find((m) => m.role === "user")!;
     expect(userMsg.content).toContain("ZCL_ROOT");
     expect(userMsg.content).toContain("METHODS run");
@@ -79,7 +82,7 @@ describe("buildDocPrompt", () => {
         usedMembers: [{ memberName: "VALIDATE", memberType: "method" }],
       },
     ];
-    const messages = buildDocPrompt(rootNode, rootSource, depDetails);
+    const messages = buildDocPrompt(rootNode, rootSource, depDetails, defaultTemplate);
     const userMsg = messages.find((m) => m.role === "user")!;
     expect(userMsg.content).toContain("ZCL_HELPER (CLAS)");
     expect(userMsg.content).toContain("Helper for validation logic.");
@@ -87,7 +90,7 @@ describe("buildDocPrompt", () => {
   });
 
   it("should include all required doc sections", () => {
-    const messages = buildDocPrompt(rootNode, rootSource, []);
+    const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
     const userMsg = messages.find((m) => m.role === "user")!;
     expect(userMsg.content).toContain("Overview");
     expect(userMsg.content).toContain("Public API");
@@ -97,9 +100,25 @@ describe("buildDocPrompt", () => {
   });
 
   it("should have system message for documentation expert", () => {
-    const messages = buildDocPrompt(rootNode, rootSource, []);
+    const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
     const sysMsg = messages.find((m) => m.role === "system")!;
     expect(sysMsg.content).toContain("ABAP documentation expert");
+  });
+
+  it("should include word limit from template", () => {
+    const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
+    const userMsg = messages.find((m) => m.role === "user")!;
+    expect(userMsg.content).toContain("under 3000 words");
+  });
+
+  it("should use minimal template sections when provided", () => {
+    const minimalTemplate = TEMPLATES["minimal"];
+    const messages = buildDocPrompt(rootNode, rootSource, [], minimalTemplate);
+    const userMsg = messages.find((m) => m.role === "user")!;
+    expect(userMsg.content).toContain("Overview");
+    expect(userMsg.content).toContain("Public API");
+    expect(userMsg.content).not.toContain("Usage Examples");
+    expect(userMsg.content).toContain("under 1000 words");
   });
 });
 
@@ -187,7 +206,7 @@ describe("bottom-up summary accumulation", () => {
         })),
       }));
 
-    const messages = buildDocPrompt(rootNode, "CLASS zcl_root DEFINITION.\nENDCLASS.", depDetails);
+    const messages = buildDocPrompt(rootNode, "CLASS zcl_root DEFINITION.\nENDCLASS.", depDetails, defaultTemplate);
     const userMsg = messages.find((m) => m.role === "user")!;
 
     // Both dependency summaries should be in the final prompt

@@ -1,4 +1,5 @@
 import { DagNode, DagEdge, LlmMessage } from "./types";
+import { DocTemplate } from "./templates";
 
 /**
  * Builds prompt messages for summarizing a dependency object.
@@ -55,6 +56,7 @@ export function buildDocPrompt(
     summary: string;
     usedMembers: Array<{ memberName: string; memberType: string }>;
   }>,
+  template: DocTemplate,
 ): LlmMessage[] {
   const system = [
     "You are an ABAP documentation expert.",
@@ -94,12 +96,9 @@ export function buildDocPrompt(
   }
 
   parts.push("");
-  parts.push("Generate documentation with these sections:");
-  parts.push("1. **Overview** — purpose and responsibility");
-  parts.push("2. **Public API** — methods, parameters, return types, exceptions");
-  parts.push("3. **Dependencies** — how each dependency is used and why");
-  parts.push("4. **Usage Examples** — typical ABAP calling patterns");
-  parts.push("5. **Notes** — design decisions, limitations, edge cases");
+  parts.push(template.sections);
+  parts.push("");
+  parts.push(`Keep the documentation under ${template.maxWords} words. Be thorough but concise.`);
 
   return [
     { role: "system", content: system },
