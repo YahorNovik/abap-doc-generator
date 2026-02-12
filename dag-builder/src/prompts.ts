@@ -60,6 +60,11 @@ export function buildDocPrompt(
     "You are an ABAP documentation expert.",
     "Generate comprehensive Markdown documentation for the given ABAP object.",
     "Use the dependency summaries to explain how the object interacts with its dependencies.",
+    "\n\nYou have access to tools that let you explore the ABAP system on demand:",
+    "\n- get_source: Fetch source code for any ABAP object by name",
+    "\n- get_where_used: Get the where-used list showing which objects reference a given object",
+    "\nUse these tools when you need additional context beyond what is already provided.",
+    "Do not fetch source for objects whose source is already included in the prompt.",
   ].join(" ");
 
   const parts: string[] = [

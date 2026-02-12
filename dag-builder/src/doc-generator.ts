@@ -1,7 +1,8 @@
 import { buildDag, createConnectedClient, fetchSourceForNodes } from "./dag-builder";
-import { callLlm, runBatch } from "./llm-client";
+import { callLlm, callLlmAgentLoop, runBatch } from "./llm-client";
 import { buildSummaryPrompt, buildDocPrompt } from "./prompts";
-import { DocInput, DocResult, DagResult, DagEdge, DagNode, LlmConfig, BatchRequest } from "./types";
+import { AGENT_TOOLS } from "./tools";
+import { DocInput, DocResult, DagResult, DagEdge, DagNode, LlmConfig, BatchRequest, ToolCall } from "./types";
 
 function log(msg: string): void {
   process.stderr.write(`[doc-generator] ${msg}\n`);
@@ -33,99 +34,126 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
   errors.push(...dagResult.errors);
   log(`DAG built: ${dagResult.nodes.length} nodes, ${dagResult.edges.length} edges.`);
 
-  // 2. Fetch source for all nodes
+  // 2. Fetch source for all nodes (ADT client stays alive for agent loop tools)
   log("Fetching source code for all nodes...");
   const adtClient = await createConnectedClient(
     input.systemUrl, input.username, input.password, input.client,
   );
 
-  let sources: Map<string, string>;
   try {
-    sources = await fetchSourceForNodes(adtClient, dagResult.nodes, errors);
+    const sources = await fetchSourceForNodes(adtClient, dagResult.nodes, errors);
+    log(`Fetched source for ${sources.size}/${dagResult.nodes.length} nodes.`);
+
+    // Build edge lookup: for each node, which deps does it use and with what members?
+    const edgesByFrom = new Map<string, DagEdge[]>();
+    for (const edge of dagResult.edges) {
+      if (!edgesByFrom.has(edge.from)) edgesByFrom.set(edge.from, []);
+      edgesByFrom.get(edge.from)!.push(edge);
+    }
+
+    const rootName = dagResult.root;
+    const topoOrder = dagResult.topologicalOrder;
+    const nodeMap = new Map(dagResult.nodes.map((n) => [n.name, n]));
+
+    // 3. Summarize dependencies (batch or realtime)
+    const useBatch = input.mode === "batch"
+      && (input.summaryLlm.provider === "openai" || input.summaryLlm.provider === "gemini");
+
+    if (useBatch) {
+      log("Using batch mode for summarization...");
+      summaryTokens = await summarizeWithBatch(
+        input.summaryLlm, topoOrder, rootName, nodeMap, sources, edgesByFrom, summaries, errors,
+      );
+    } else {
+      log("Using realtime mode for summarization...");
+      summaryTokens = await summarizeRealtime(
+        input.summaryLlm, topoOrder, rootName, nodeMap, sources, edgesByFrom, summaries, errors,
+      );
+    }
+
+    // 4. Generate full documentation for root (agent loop with ADT tools)
+    log(`Generating documentation for ${rootName}...`);
+    const rootNode = nodeMap.get(rootName);
+    const rootSource = sources.get(rootName);
+
+    if (!rootNode || !rootSource) {
+      return {
+        objectName: rootName,
+        documentation: `# ${rootName}\n\nFailed to generate documentation: source code not available.`,
+        summaries,
+        tokenUsage: { summaryTokens, docTokens },
+        errors: [...errors, "Root object source not available."],
+      };
+    }
+
+    // Build dependency details for the root prompt
+    const rootEdges = edgesByFrom.get(rootName) ?? [];
+    const depDetails = rootEdges
+      .filter((e) => nodeMap.has(e.to))
+      .map((e) => ({
+        name: e.to,
+        type: nodeMap.get(e.to)!.type,
+        summary: summaries[e.to] ?? "[No summary available]",
+        usedMembers: e.references.map((r) => ({
+          memberName: r.memberName,
+          memberType: r.memberType,
+        })),
+      }));
+
+    const docMessages = buildDocPrompt(rootNode, rootSource, depDetails);
+
+    // Tool executor: gives the LLM access to ADT for on-demand source and where-used
+    const toolExecutor = async (tc: ToolCall): Promise<string> => {
+      switch (tc.name) {
+        case "get_source": {
+          const objectName = tc.arguments.object_name;
+          log(`  Tool: get_source(${objectName})`);
+          try {
+            return await adtClient.fetchSource(objectName);
+          } catch (err) {
+            return `Error fetching source for ${objectName}: ${String(err)}`;
+          }
+        }
+        case "get_where_used": {
+          const objectName = tc.arguments.object_name;
+          log(`  Tool: get_where_used(${objectName})`);
+          try {
+            const refs = await adtClient.getWhereUsed(objectName);
+            if (refs.length === 0) return `No where-used references found for ${objectName}.`;
+            return refs.map((r) => `${r.name} (${r.type}): ${r.description}`).join("\n");
+          } catch (err) {
+            return `Error getting where-used for ${objectName}: ${String(err)}`;
+          }
+        }
+        default:
+          return `Unknown tool: ${tc.name}`;
+      }
+    };
+
+    try {
+      const response = await callLlmAgentLoop(input.docLlm, docMessages, AGENT_TOOLS, toolExecutor);
+      docTokens = response.usage.promptTokens + response.usage.completionTokens;
+      log("Documentation generated successfully.");
+
+      return {
+        objectName: rootName,
+        documentation: response.content,
+        summaries,
+        tokenUsage: { summaryTokens, docTokens },
+        errors,
+      };
+    } catch (err) {
+      errors.push(`Failed to generate documentation: ${String(err)}`);
+      return {
+        objectName: rootName,
+        documentation: `# ${rootName}\n\nFailed to generate documentation: ${String(err)}`,
+        summaries,
+        tokenUsage: { summaryTokens, docTokens },
+        errors,
+      };
+    }
   } finally {
     try { await adtClient.disconnect(); } catch { /* ignore */ }
-  }
-  log(`Fetched source for ${sources.size}/${dagResult.nodes.length} nodes.`);
-
-  // Build edge lookup: for each node, which deps does it use and with what members?
-  const edgesByFrom = new Map<string, DagEdge[]>();
-  for (const edge of dagResult.edges) {
-    if (!edgesByFrom.has(edge.from)) edgesByFrom.set(edge.from, []);
-    edgesByFrom.get(edge.from)!.push(edge);
-  }
-
-  const rootName = dagResult.root;
-  const topoOrder = dagResult.topologicalOrder;
-  const nodeMap = new Map(dagResult.nodes.map((n) => [n.name, n]));
-
-  // 3. Summarize dependencies (batch or realtime)
-  const useBatch = input.mode === "batch"
-    && (input.summaryLlm.provider === "openai" || input.summaryLlm.provider === "gemini");
-
-  if (useBatch) {
-    log("Using batch mode for summarization...");
-    summaryTokens = await summarizeWithBatch(
-      input.summaryLlm, topoOrder, rootName, nodeMap, sources, edgesByFrom, summaries, errors,
-    );
-  } else {
-    log("Using realtime mode for summarization...");
-    summaryTokens = await summarizeRealtime(
-      input.summaryLlm, topoOrder, rootName, nodeMap, sources, edgesByFrom, summaries, errors,
-    );
-  }
-
-  // 4. Generate full documentation for root
-  log(`Generating documentation for ${rootName}...`);
-  const rootNode = nodeMap.get(rootName);
-  const rootSource = sources.get(rootName);
-
-  if (!rootNode || !rootSource) {
-    return {
-      objectName: rootName,
-      documentation: `# ${rootName}\n\nFailed to generate documentation: source code not available.`,
-      summaries,
-      tokenUsage: { summaryTokens, docTokens },
-      errors: [...errors, "Root object source not available."],
-    };
-  }
-
-  // Build dependency details for the root prompt
-  const rootEdges = edgesByFrom.get(rootName) ?? [];
-  const depDetails = rootEdges
-    .filter((e) => nodeMap.has(e.to))
-    .map((e) => ({
-      name: e.to,
-      type: nodeMap.get(e.to)!.type,
-      summary: summaries[e.to] ?? "[No summary available]",
-      usedMembers: e.references.map((r) => ({
-        memberName: r.memberName,
-        memberType: r.memberType,
-      })),
-    }));
-
-  const docMessages = buildDocPrompt(rootNode, rootSource, depDetails);
-
-  try {
-    const response = await callLlm(input.docLlm, docMessages);
-    docTokens = response.usage.promptTokens + response.usage.completionTokens;
-    log("Documentation generated successfully.");
-
-    return {
-      objectName: rootName,
-      documentation: response.content,
-      summaries,
-      tokenUsage: { summaryTokens, docTokens },
-      errors,
-    };
-  } catch (err) {
-    errors.push(`Failed to generate documentation: ${String(err)}`);
-    return {
-      objectName: rootName,
-      documentation: `# ${rootName}\n\nFailed to generate documentation: ${String(err)}`,
-      summaries,
-      tokenUsage: { summaryTokens, docTokens },
-      errors,
-    };
   }
 }
 

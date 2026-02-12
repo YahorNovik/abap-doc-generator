@@ -95,4 +95,9 @@
         </page>
     </extension>
 
+    <!-- Preference defaults -->
+    <extension point="org.eclipse.core.runtime.preferences">
+        <initializer class="com.abap.doc.plugin.preferences.PreferenceInitializer"/>
+    </extension>
+
 </plugin>

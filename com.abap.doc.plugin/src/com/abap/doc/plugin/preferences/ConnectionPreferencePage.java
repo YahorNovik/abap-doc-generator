@@ -37,6 +37,25 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         { "OpenAI-compatible", "openai-compatible" }
     };
 
+    private static final String[][] MODEL_OPTIONS = {
+        // Gemini
+        { "Gemini 3 Pro (preview)", "gemini-3-pro-preview" },
+        { "Gemini 3 Flash (preview)", "gemini-3-flash-preview" },
+        { "Gemini 2.5 Pro", "gemini-2.5-pro" },
+        { "Gemini 2.5 Flash", "gemini-2.5-flash" },
+        { "Gemini 2.5 Flash Lite", "gemini-2.5-flash-lite" },
+        // OpenAI
+        { "GPT-5.2", "gpt-5.2" },
+        { "GPT-5", "gpt-5" },
+        { "GPT-5 Mini", "gpt-5-mini" },
+        { "GPT-5 Nano", "gpt-5-nano" },
+        { "GPT-4.1", "gpt-4.1" },
+        { "GPT-4.1 Mini", "gpt-4.1-mini" },
+        { "GPT-4.1 Nano", "gpt-4.1-nano" },
+        { "GPT-4o", "gpt-4o" },
+        { "GPT-4o Mini", "gpt-4o-mini" },
+    };
+
     public ConnectionPreferencePage() {
         super(GRID);
         setPreferenceStore(Activator.getDefault().getPreferenceStore());
@@ -54,13 +73,13 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         // Summary LLM
         addField(new ComboFieldEditor(PREF_SUMMARY_PROVIDER, "Summary LLM Provider:", PROVIDER_OPTIONS, getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_SUMMARY_API_KEY, "Summary LLM API Key:", getFieldEditorParent()));
-        addField(new StringFieldEditor(PREF_SUMMARY_MODEL, "Summary LLM Model:", getFieldEditorParent()));
+        addField(new ComboFieldEditor(PREF_SUMMARY_MODEL, "Summary LLM Model:", MODEL_OPTIONS, getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_SUMMARY_BASE_URL, "Summary LLM Base URL (optional):", getFieldEditorParent()));
 
         // Documentation LLM
         addField(new ComboFieldEditor(PREF_DOC_PROVIDER, "Doc LLM Provider:", PROVIDER_OPTIONS, getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_DOC_API_KEY, "Doc LLM API Key:", getFieldEditorParent()));
-        addField(new StringFieldEditor(PREF_DOC_MODEL, "Doc LLM Model:", getFieldEditorParent()));
+        addField(new ComboFieldEditor(PREF_DOC_MODEL, "Doc LLM Model:", MODEL_OPTIONS, getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_DOC_BASE_URL, "Doc LLM Base URL (optional):", getFieldEditorParent()));
 
         // Mode

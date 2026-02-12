@@ -1,4 +1,5 @@
-import { LlmConfig, LlmMessage, LlmResponse, BatchRequest, BatchStatus } from "./types";
+import { LlmConfig, LlmMessage, LlmResponse, BatchRequest, BatchStatus, ToolDefinition, ToolCall, ToolExecutor } from "./types";
+import { toOpenAITools, toGeminiTools } from "./tools";
 
 const DEFAULT_MAX_TOKENS = 2048;
 const DEFAULT_TEMPERATURE = 0.3;
@@ -522,6 +523,318 @@ async function getGeminiBatchResults(
   geminiBatchCache.delete(batchId);
 
   return results;
+}
+
+// ─── Agent Loop ───
+
+const DEFAULT_MAX_ITERATIONS = 10;
+
+/**
+ * Calls an LLM in an agent loop with tool support.
+ * The LLM can request tool calls which are executed via toolExecutor,
+ * then results are fed back until the LLM produces a text response.
+ *
+ * Only the final doc generation step uses this — summarization remains single-shot.
+ */
+export async function callLlmAgentLoop(
+  config: LlmConfig,
+  messages: LlmMessage[],
+  tools: ToolDefinition[],
+  toolExecutor: ToolExecutor,
+  maxIterations: number = DEFAULT_MAX_ITERATIONS,
+): Promise<LlmResponse> {
+  // openai-compatible may not support function calling — fall back to single call
+  if (config.provider === "openai-compatible") {
+    log("openai-compatible provider: falling back to single call (no tools)");
+    return callLlm(config, messages);
+  }
+
+  const maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const temperature = config.temperature ?? DEFAULT_TEMPERATURE;
+  const conversation: LlmMessage[] = [...messages];
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    // Call LLM with tools (with retry logic)
+    let response: AgentResponse;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        if (config.provider === "gemini") {
+          response = await callGeminiWithTools(config, conversation, tools, maxTokens, temperature);
+        } else {
+          response = await callOpenAIWithTools(config, conversation, tools, maxTokens, temperature);
+        }
+        break;
+      } catch (err: any) {
+        const status = err?.status ?? 0;
+        const retryable = status === 429 || status === 500 || status === 503;
+        if (retryable && attempt < MAX_RETRIES) {
+          const delay = RETRY_DELAYS[attempt] ?? 8000;
+          log(`${status} error in agent loop, retrying in ${delay}ms...`);
+          await sleep(delay);
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    totalPromptTokens += response!.usage.promptTokens;
+    totalCompletionTokens += response!.usage.completionTokens;
+
+    // No tool calls — return text response
+    if (response!.toolCalls.length === 0) {
+      return {
+        content: response!.content ?? "",
+        usage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens },
+      };
+    }
+
+    // Process tool calls
+    log(`Agent loop iteration ${iteration + 1}: ${response!.toolCalls.length} tool call(s)`);
+
+    // Append assistant message with tool calls
+    conversation.push({
+      role: "assistant",
+      content: response!.content ?? "",
+      toolCalls: response!.toolCalls,
+    });
+
+    // Execute tools and append results
+    for (const tc of response!.toolCalls) {
+      let result: string;
+      try {
+        result = await toolExecutor(tc);
+      } catch (err) {
+        result = `Error: ${String(err)}`;
+      }
+      conversation.push({
+        role: "tool",
+        content: result,
+        toolCallId: tc.id,
+        name: tc.name,
+      });
+    }
+  }
+
+  // Max iterations reached — make one final call without tools
+  log(`Agent loop: max iterations (${maxIterations}) reached, forcing final response`);
+  return callLlm(config, conversation);
+}
+
+// ─── Agent Response Type (internal) ───
+
+interface AgentResponse {
+  content: string | null;
+  toolCalls: ToolCall[];
+  usage: { promptTokens: number; completionTokens: number };
+}
+
+// ─── OpenAI with Tools ───
+
+async function callOpenAIWithTools(
+  config: LlmConfig,
+  messages: LlmMessage[],
+  tools: ToolDefinition[],
+  maxTokens: number,
+  temperature: number,
+): Promise<AgentResponse> {
+  const url = "https://api.openai.com/v1/chat/completions";
+
+  const body: Record<string, any> = {
+    model: config.model,
+    messages: serializeOpenAIMessages(messages),
+    max_tokens: maxTokens,
+    temperature,
+    tools: toOpenAITools(tools),
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    const err: any = new Error(`OpenAI API error ${res.status}: ${text}`);
+    err.status = res.status;
+    throw err;
+  }
+
+  const json: any = await res.json();
+  const choice = json.choices?.[0] ?? {};
+  const message = choice.message ?? {};
+  const usage = json.usage ?? {};
+
+  const toolCalls: ToolCall[] = (message.tool_calls ?? []).map((tc: any) => ({
+    id: tc.id,
+    name: tc.function.name,
+    arguments: JSON.parse(tc.function.arguments),
+  }));
+
+  return {
+    content: message.content ?? null,
+    toolCalls,
+    usage: {
+      promptTokens: usage.prompt_tokens ?? 0,
+      completionTokens: usage.completion_tokens ?? 0,
+    },
+  };
+}
+
+function serializeOpenAIMessages(messages: LlmMessage[]): any[] {
+  return messages.map((m) => {
+    if (m.role === "tool") {
+      return { role: "tool", tool_call_id: m.toolCallId, content: m.content };
+    }
+    if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+      return {
+        role: "assistant",
+        content: m.content || null,
+        tool_calls: m.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+        })),
+      };
+    }
+    return { role: m.role, content: m.content };
+  });
+}
+
+// ─── Gemini with Tools ───
+
+async function callGeminiWithTools(
+  config: LlmConfig,
+  messages: LlmMessage[],
+  tools: ToolDefinition[],
+  maxTokens: number,
+  temperature: number,
+): Promise<AgentResponse> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key=${config.apiKey}`;
+
+  const { contents, systemInstruction } = serializeGeminiMessages(messages);
+
+  const body: Record<string, any> = {
+    contents,
+    generationConfig: { maxOutputTokens: maxTokens, temperature },
+    tools: toGeminiTools(tools),
+  };
+
+  if (systemInstruction) {
+    body.systemInstruction = systemInstruction;
+  }
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    const err: any = new Error(`Gemini API error ${res.status}: ${text}`);
+    err.status = res.status;
+    throw err;
+  }
+
+  const json: any = await res.json();
+  const parts = json.candidates?.[0]?.content?.parts ?? [];
+  const usage = json.usageMetadata ?? {};
+
+  const toolCalls: ToolCall[] = [];
+  let textContent: string | null = null;
+
+  for (const part of parts) {
+    if (part.functionCall) {
+      toolCalls.push({
+        id: `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: part.functionCall.name,
+        arguments: part.functionCall.args ?? {},
+      });
+    }
+    if (part.text !== undefined) {
+      textContent = (textContent ?? "") + part.text;
+    }
+  }
+
+  return {
+    content: textContent,
+    toolCalls,
+    usage: {
+      promptTokens: usage.promptTokenCount ?? 0,
+      completionTokens: usage.candidatesTokenCount ?? 0,
+    },
+  };
+}
+
+function serializeGeminiMessages(messages: LlmMessage[]): {
+  contents: any[];
+  systemInstruction?: any;
+} {
+  const systemMessages = messages.filter((m) => m.role === "system");
+  const nonSystem = messages.filter((m) => m.role !== "system");
+
+  const contents: any[] = [];
+
+  for (let i = 0; i < nonSystem.length; i++) {
+    const m = nonSystem[i];
+
+    if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
+      // Model message with function calls
+      contents.push({
+        role: "model",
+        parts: m.toolCalls.map((tc) => ({
+          functionCall: { name: tc.name, args: tc.arguments },
+        })),
+      });
+    } else if (m.role === "tool") {
+      // Group consecutive tool results into a single user message
+      // (Gemini requires all functionResponse parts from one turn in one message)
+      const lastContent = contents[contents.length - 1];
+      if (lastContent && lastContent._isFunctionResponse) {
+        lastContent.parts.push({
+          functionResponse: {
+            name: m.name,
+            response: { content: m.content },
+          },
+        });
+      } else {
+        contents.push({
+          role: "user",
+          _isFunctionResponse: true,
+          parts: [{
+            functionResponse: {
+              name: m.name,
+              response: { content: m.content },
+            },
+          }],
+        });
+      }
+    } else {
+      contents.push({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      });
+    }
+  }
+
+  // Clean up internal marker
+  for (const c of contents) {
+    delete c._isFunctionResponse;
+  }
+
+  const result: { contents: any[]; systemInstruction?: any } = { contents };
+  if (systemMessages.length > 0) {
+    result.systemInstruction = {
+      parts: [{ text: systemMessages.map((m) => m.content).join("\n\n") }],
+    };
+  }
+  return result;
 }
 
 // ─── Helpers ───

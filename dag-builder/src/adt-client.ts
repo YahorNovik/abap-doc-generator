@@ -1,4 +1,4 @@
-import { ADTClient, SearchResult } from "abap-adt-api";
+import { ADTClient, SearchResult, UsageReference } from "abap-adt-api";
 
 export class AdtClientWrapper {
   private client: ADTClient;
@@ -43,6 +43,25 @@ export class AdtClientWrapper {
       type: this.adtTypeToAbapType(match["adtcore:type"]),
       uri: match["adtcore:uri"],
     };
+  }
+
+  /**
+   * Returns the where-used list for a given ABAP object.
+   */
+  async getWhereUsed(objectName: string): Promise<Array<{ name: string; type: string; description: string }>> {
+    const objectUrl = await this.resolveObjectUrl(objectName);
+    if (!objectUrl) {
+      throw new Error(`Object ${objectName} not found via ADT search.`);
+    }
+
+    const references: UsageReference[] = await this.client.usageReferences(objectUrl);
+    return references
+      .filter((r) => r["adtcore:name"])
+      .map((r) => ({
+        name: r["adtcore:name"],
+        type: r["adtcore:type"] ?? "unknown",
+        description: r["adtcore:description"] ?? "",
+      }));
   }
 
   /**

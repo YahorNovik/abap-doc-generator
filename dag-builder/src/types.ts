@@ -53,8 +53,11 @@ export interface LlmConfig {
 }
 
 export interface LlmMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  toolCalls?: ToolCall[];    // on assistant messages with tool calls
+  toolCallId?: string;       // on tool result messages (role === "tool")
+  name?: string;             // function name for tool results
 }
 
 export interface LlmResponse {
@@ -84,6 +87,26 @@ export interface DocResult {
   tokenUsage: { summaryTokens: number; docTokens: number };
   errors: string[];
 }
+
+// ─── Agent / Tool types ───
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, { type: string; description: string; enum?: string[] }>;
+    required: string[];
+  };
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, any>;
+}
+
+export type ToolExecutor = (toolCall: ToolCall) => Promise<string>;
 
 // ─── Batch types ───
 
