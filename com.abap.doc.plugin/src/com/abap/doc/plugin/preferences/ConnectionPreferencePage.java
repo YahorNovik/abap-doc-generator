@@ -68,7 +68,6 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         { "Default", "default" },
         { "Minimal", "minimal" },
         { "Detailed", "detailed" },
-        { "API Reference", "api-reference" },
         { "Custom", "custom" },
     };
 

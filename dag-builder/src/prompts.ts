@@ -58,15 +58,25 @@ export function buildDocPrompt(
   }>,
   template: DocTemplate,
 ): LlmMessage[] {
+  const objectTypeLabel = rootNode.type === "CLAS" ? "ABAP class"
+    : rootNode.type === "INTF" ? "ABAP interface"
+    : rootNode.type === "FUGR" ? "ABAP function group"
+    : rootNode.type === "PROG" ? "ABAP report/program"
+    : "ABAP object";
+
   const system = [
-    "You are an ABAP documentation expert.",
-    "Generate comprehensive Markdown documentation for the given ABAP object.",
+    `You are an ABAP documentation expert. You are documenting an ${objectTypeLabel}: ${rootNode.name}.`,
+    "Generate Markdown documentation following the structure specified in the user message.",
     "Use the dependency summaries to explain how the object interacts with its dependencies.",
+    rootNode.type === "CLAS" || rootNode.type === "INTF"
+      ? "Document all methods (public, protected, private) with their parameters, return types, and exceptions."
+      : "Explain the program logic step by step, breaking it into logical parts.",
     "\n\nYou have access to tools that let you explore the ABAP system on demand:",
     "\n- get_source: Fetch source code for any ABAP object by name",
     "\n- get_where_used: Get the where-used list showing which objects reference a given object",
     "\nUse these tools when you need additional context beyond what is already provided.",
     "Do not fetch source for objects whose source is already included in the prompt.",
+    "For the Where-Used section, always call get_where_used to get real data from the system.",
   ].join(" ");
 
   const parts: string[] = [

@@ -1,83 +1,112 @@
 import { describe, it, expect } from "vitest";
-import { TEMPLATES, resolveTemplate } from "../src/templates";
+import { resolveTemplate } from "../src/templates";
 
-describe("TEMPLATES", () => {
-  it("has all four predefined templates", () => {
-    expect(Object.keys(TEMPLATES)).toEqual(["default", "minimal", "detailed", "api-reference"]);
-  });
-
-  it("each template has required fields", () => {
-    for (const [key, tmpl] of Object.entries(TEMPLATES)) {
-      expect(tmpl.name, `${key}.name`).toBeTruthy();
-      expect(tmpl.sections, `${key}.sections`).toBeTruthy();
-      expect(tmpl.maxWords, `${key}.maxWords`).toBeGreaterThan(0);
-      expect(tmpl.maxOutputTokens, `${key}.maxOutputTokens`).toBeGreaterThanOrEqual(4096);
-    }
-  });
-
-  it("default template has 5 sections", () => {
-    const sections = TEMPLATES["default"].sections;
-    expect(sections).toContain("Overview");
-    expect(sections).toContain("Public API");
-    expect(sections).toContain("Dependencies");
-    expect(sections).toContain("Usage Examples");
-    expect(sections).toContain("Notes");
-  });
-
-  it("minimal template has 2 sections", () => {
-    const sections = TEMPLATES["minimal"].sections;
-    expect(sections).toContain("Overview");
-    expect(sections).toContain("Public API");
-    expect(sections).not.toContain("Dependencies");
-  });
-});
-
-describe("resolveTemplate", () => {
-  it("returns default template when no type specified", () => {
-    const tmpl = resolveTemplate();
+describe("resolveTemplate — class/interface", () => {
+  it("returns default template for classes when no type specified", () => {
+    const tmpl = resolveTemplate(undefined, undefined, "CLAS");
     expect(tmpl.name).toBe("Default");
     expect(tmpl.maxOutputTokens).toBe(8192);
+    expect(tmpl.maxWords).toBe(3000);
   });
 
-  it("returns default template for undefined type", () => {
-    const tmpl = resolveTemplate(undefined);
-    expect(tmpl.name).toBe("Default");
+  it("includes Methods section for classes", () => {
+    const tmpl = resolveTemplate("default", undefined, "CLAS");
+    expect(tmpl.sections).toContain("Methods");
+    expect(tmpl.sections).toContain("public, protected, private");
   });
 
-  it("returns default template for empty string", () => {
-    const tmpl = resolveTemplate("");
-    expect(tmpl.name).toBe("Default");
+  it("includes Where-Used section for classes", () => {
+    const tmpl = resolveTemplate("default", undefined, "CLAS");
+    expect(tmpl.sections).toContain("Where-Used");
+    expect(tmpl.sections).toContain("get_where_used");
   });
 
-  it("returns default template for unknown type", () => {
-    const tmpl = resolveTemplate("nonexistent");
-    expect(tmpl.name).toBe("Default");
+  it("includes Dependencies section for classes", () => {
+    const tmpl = resolveTemplate("default", undefined, "CLAS");
+    expect(tmpl.sections).toContain("Dependencies");
   });
 
-  it("returns minimal template", () => {
-    const tmpl = resolveTemplate("minimal");
+  it("does not include Logic section for classes", () => {
+    const tmpl = resolveTemplate("default", undefined, "CLAS");
+    expect(tmpl.sections).not.toContain("Logic");
+  });
+
+  it("works for INTF type", () => {
+    const tmpl = resolveTemplate("default", undefined, "INTF");
+    expect(tmpl.sections).toContain("Methods");
+  });
+
+  it("minimal class template has only Overview and Methods", () => {
+    const tmpl = resolveTemplate("minimal", undefined, "CLAS");
     expect(tmpl.name).toBe("Minimal");
+    expect(tmpl.sections).toContain("Overview");
+    expect(tmpl.sections).toContain("Methods");
+    expect(tmpl.sections).not.toContain("Dependencies");
     expect(tmpl.maxWords).toBe(1000);
     expect(tmpl.maxOutputTokens).toBe(4096);
   });
 
-  it("returns detailed template", () => {
-    const tmpl = resolveTemplate("detailed");
+  it("detailed class template includes Error Handling", () => {
+    const tmpl = resolveTemplate("detailed", undefined, "CLAS");
     expect(tmpl.name).toBe("Detailed");
+    expect(tmpl.sections).toContain("Error Handling");
     expect(tmpl.maxWords).toBe(5000);
     expect(tmpl.maxOutputTokens).toBe(16384);
   });
+});
 
-  it("returns api-reference template", () => {
-    const tmpl = resolveTemplate("api-reference");
-    expect(tmpl.name).toBe("API Reference");
-    expect(tmpl.maxWords).toBe(2000);
+describe("resolveTemplate — report/FM", () => {
+  it("includes Logic section for reports", () => {
+    const tmpl = resolveTemplate("default", undefined, "PROG");
+    expect(tmpl.sections).toContain("Logic");
+    expect(tmpl.sections).not.toContain("Methods");
+  });
+
+  it("includes Where-Used section for reports", () => {
+    const tmpl = resolveTemplate("default", undefined, "FUGR");
+    expect(tmpl.sections).toContain("Where-Used");
+  });
+
+  it("detailed report template includes Selection Screen and Subroutines", () => {
+    const tmpl = resolveTemplate("detailed", undefined, "PROG");
+    expect(tmpl.sections).toContain("Selection Screen");
+    expect(tmpl.sections).toContain("Subroutines");
+  });
+
+  it("minimal report template has only Overview and Logic", () => {
+    const tmpl = resolveTemplate("minimal", undefined, "FUGR");
+    expect(tmpl.sections).toContain("Overview");
+    expect(tmpl.sections).toContain("Logic");
+    expect(tmpl.sections).not.toContain("Dependencies");
+  });
+});
+
+describe("resolveTemplate — fallback and custom", () => {
+  it("falls back to default when no type specified", () => {
+    const tmpl = resolveTemplate();
+    expect(tmpl.name).toBe("Default");
+  });
+
+  it("falls back to default for empty string", () => {
+    const tmpl = resolveTemplate("");
+    expect(tmpl.name).toBe("Default");
+  });
+
+  it("falls back to default for unknown type", () => {
+    const tmpl = resolveTemplate("nonexistent");
+    expect(tmpl.name).toBe("Default");
+  });
+
+  it("defaults to class sections when no objectType", () => {
+    const tmpl = resolveTemplate("default");
+    expect(tmpl.sections).toContain("Methods");
+    expect(tmpl.sections).not.toContain("Logic");
   });
 
   it("returns custom template with user text", () => {
-    const tmpl = resolveTemplate("custom", "My custom sections:\n1. Summary\n2. API");
+    const tmpl = resolveTemplate("custom", "My custom:\n1. Summary\n2. Details");
     expect(tmpl.name).toBe("Custom");
-    expect(tmpl.sections).toBe("My custom sections:\n1. Summary\n2. API");
+    expect(tmpl.sections).toBe("My custom:\n1. Summary\n2. Details");
     expect(tmpl.maxOutputTokens).toBe(8192);
   });
 

@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildSummaryPrompt, buildDocPrompt } from "../src/prompts";
 import { computeTopologicalLevels } from "../src/doc-generator";
 import { DagNode, DagEdge, LlmMessage } from "../src/types";
-import { TEMPLATES, resolveTemplate } from "../src/templates";
+import { resolveTemplate } from "../src/templates";
 
-const defaultTemplate = TEMPLATES["default"];
+const defaultTemplate = resolveTemplate("default", undefined, "CLAS");
+const minimalTemplate = resolveTemplate("minimal", undefined, "CLAS");
 
 // We test the prompt builders and the documentation flow logic directly.
 // The actual generateDocumentation() requires a live SAP connection,
@@ -89,20 +90,22 @@ describe("buildDocPrompt", () => {
     expect(userMsg.content).toContain("VALIDATE (method)");
   });
 
-  it("should include all required doc sections", () => {
+  it("should include all required doc sections for class", () => {
     const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
     const userMsg = messages.find((m) => m.role === "user")!;
     expect(userMsg.content).toContain("Overview");
-    expect(userMsg.content).toContain("Public API");
+    expect(userMsg.content).toContain("Methods");
     expect(userMsg.content).toContain("Dependencies");
-    expect(userMsg.content).toContain("Usage Examples");
+    expect(userMsg.content).toContain("Where-Used");
     expect(userMsg.content).toContain("Notes");
   });
 
-  it("should have system message for documentation expert", () => {
+  it("should have system message with object type context", () => {
     const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
     const sysMsg = messages.find((m) => m.role === "system")!;
     expect(sysMsg.content).toContain("ABAP documentation expert");
+    expect(sysMsg.content).toContain("ABAP class");
+    expect(sysMsg.content).toContain("ZCL_ROOT");
   });
 
   it("should include word limit from template", () => {
@@ -112,12 +115,11 @@ describe("buildDocPrompt", () => {
   });
 
   it("should use minimal template sections when provided", () => {
-    const minimalTemplate = TEMPLATES["minimal"];
     const messages = buildDocPrompt(rootNode, rootSource, [], minimalTemplate);
     const userMsg = messages.find((m) => m.role === "user")!;
     expect(userMsg.content).toContain("Overview");
-    expect(userMsg.content).toContain("Public API");
-    expect(userMsg.content).not.toContain("Usage Examples");
+    expect(userMsg.content).toContain("Methods");
+    expect(userMsg.content).not.toContain("Dependencies");
     expect(userMsg.content).toContain("under 1000 words");
   });
 });

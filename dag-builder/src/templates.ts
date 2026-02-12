@@ -5,77 +5,117 @@ export interface DocTemplate {
   maxOutputTokens: number;
 }
 
-export const TEMPLATES: Record<string, DocTemplate> = {
-  default: {
-    name: "Default",
-    sections: [
-      "Generate documentation with these sections:",
-      "1. **Overview** — purpose and responsibility (1-2 paragraphs)",
-      "2. **Public API** — methods with parameters, return types, and exceptions (use tables)",
-      "3. **Dependencies** — how each dependency is used and why",
-      "4. **Usage Examples** — typical ABAP calling patterns",
-      "5. **Notes** — design decisions, limitations, edge cases",
-    ].join("\n"),
-    maxWords: 3000,
-    maxOutputTokens: 8192,
-  },
+// ─── Section builders by object type ───
 
-  minimal: {
-    name: "Minimal",
-    sections: [
+function classSections(detail: "default" | "minimal" | "detailed"): string {
+  if (detail === "minimal") {
+    return [
       "Generate concise documentation with these sections:",
       "1. **Overview** — one paragraph describing purpose and responsibility",
-      "2. **Public API** — method signatures with brief descriptions (use a table)",
-    ].join("\n"),
-    maxWords: 1000,
-    maxOutputTokens: 4096,
-  },
+      "2. **Methods** — for each method (public, protected, private): brief description, parameters, return type, exceptions (use tables)",
+    ].join("\n");
+  }
 
-  detailed: {
-    name: "Detailed",
-    sections: [
+  if (detail === "detailed") {
+    return [
       "Generate comprehensive documentation with these sections:",
-      "1. **Overview** — purpose, responsibility, and design rationale",
-      "2. **Architecture** — class structure, inheritance, design patterns used",
-      "3. **Public API** — methods with parameters, return types, and exceptions (use tables)",
-      "4. **Internal Implementation** — key private/protected methods and their role",
-      "5. **Dependencies** — detailed explanation of each dependency interaction",
-      "6. **Error Handling** — exceptions raised, error scenarios, recovery patterns",
-      "7. **Usage Examples** — typical ABAP calling patterns with full code samples",
-      "8. **Configuration** — customization points, constants, configuration options",
-      "9. **Notes** — design decisions, limitations, edge cases, migration notes",
-    ].join("\n"),
-    maxWords: 5000,
-    maxOutputTokens: 16384,
-  },
-
-  "api-reference": {
-    name: "API Reference",
-    sections: [
-      "Generate API reference documentation with these sections:",
-      "1. **Overview** — one paragraph describing purpose",
-      "2. **Types** — public type definitions (table: name, type, description)",
-      "3. **Constants** — public constants (table: name, value, description)",
-      "4. **Methods** — for each public method:",
-      "   - Signature",
-      "   - Parameters (table: name, type, optional, description)",
+      "1. **Overview** — purpose, responsibility, and design rationale (1-2 paragraphs)",
+      "2. **Methods** — for each method (public, protected, private):",
+      "   - Description of what the method does and why",
+      "   - Parameters (table: name, type, direction, description)",
       "   - Return type",
-      "   - Exceptions",
-      "   - Brief description",
-      "5. **Events** — if applicable",
-      "",
-      "Use table format wherever possible. Keep prose minimal.",
-    ].join("\n"),
-    maxWords: 2000,
-    maxOutputTokens: 8192,
-  },
+      "   - Exceptions raised",
+      "   Group methods by visibility (PUBLIC, PROTECTED, PRIVATE).",
+      "3. **Dependencies** — detailed explanation of each dependency: what it is, how it is used, and why",
+      "4. **Where-Used** — where this object is used in the system, how callers use it, and in what context. Use the get_where_used tool to retrieve this information.",
+      "5. **Error Handling** — exception classes raised, error scenarios, how callers should handle them",
+      "6. **Notes** — design decisions, limitations, edge cases, migration notes",
+    ].join("\n");
+  }
+
+  // default
+  return [
+    "Generate documentation with these sections:",
+    "1. **Overview** — purpose and responsibility (1-2 paragraphs)",
+    "2. **Methods** — for each method (public, protected, private):",
+    "   - Description of what the method does",
+    "   - Parameters (table: name, type, direction, description)",
+    "   - Return type",
+    "   - Exceptions raised",
+    "   Group methods by visibility (PUBLIC, PROTECTED, PRIVATE).",
+    "3. **Dependencies** — how each dependency is used and why",
+    "4. **Where-Used** — where this object is used in the system, how and why. Use the get_where_used tool to retrieve this information.",
+    "5. **Notes** — design decisions, limitations, edge cases",
+  ].join("\n");
+}
+
+function reportSections(detail: "default" | "minimal" | "detailed"): string {
+  if (detail === "minimal") {
+    return [
+      "Generate concise documentation with these sections:",
+      "1. **Overview** — one paragraph describing purpose and responsibility",
+      "2. **Logic** — step-by-step explanation of the program logic, broken into logical parts/blocks",
+    ].join("\n");
+  }
+
+  if (detail === "detailed") {
+    return [
+      "Generate comprehensive documentation with these sections:",
+      "1. **Overview** — purpose, responsibility, and design rationale (1-2 paragraphs)",
+      "2. **Selection Screen** — describe selection screen parameters and their purpose (if applicable)",
+      "3. **Logic** — step-by-step explanation of the program logic, broken into logical parts/blocks. For each part explain what it does, why, and how.",
+      "4. **Subroutines / Function Modules** — for each FORM or function module: description, parameters, what it does",
+      "5. **Dependencies** — detailed explanation of each dependency: what it is, how it is used, and why",
+      "6. **Where-Used** — where this program/FM is called, how and in what context. Use the get_where_used tool to retrieve this information.",
+      "7. **Notes** — design decisions, limitations, edge cases, migration notes",
+    ].join("\n");
+  }
+
+  // default
+  return [
+    "Generate documentation with these sections:",
+    "1. **Overview** — purpose and responsibility (1-2 paragraphs)",
+    "2. **Logic** — step-by-step explanation of the program logic, broken into logical parts/blocks. For each part explain what it does and why.",
+    "3. **Dependencies** — how each dependency is used and why",
+    "4. **Where-Used** — where this program/FM is called, how and why. Use the get_where_used tool to retrieve this information.",
+    "5. **Notes** — design decisions, limitations, edge cases",
+  ].join("\n");
+}
+
+// ─── Detail-level configs ───
+
+interface TemplateConfig {
+  name: string;
+  detail: "default" | "minimal" | "detailed";
+  maxWords: number;
+  maxOutputTokens: number;
+}
+
+const TEMPLATE_CONFIGS: Record<string, TemplateConfig> = {
+  default: { name: "Default", detail: "default", maxWords: 3000, maxOutputTokens: 8192 },
+  minimal: { name: "Minimal", detail: "minimal", maxWords: 1000, maxOutputTokens: 4096 },
+  detailed: { name: "Detailed", detail: "detailed", maxWords: 5000, maxOutputTokens: 16384 },
 };
 
 /**
- * Resolves a template from the type name and optional custom text.
+ * Returns true if the object type represents a class or interface.
+ */
+function isClassLike(objectType?: string): boolean {
+  if (!objectType) return true;
+  const t = objectType.toUpperCase();
+  return t === "CLAS" || t === "INTF";
+}
+
+/**
+ * Resolves a template based on template type, custom text, and ABAP object type.
+ * Object type determines which section structure to use (class vs report/FM).
  * Falls back to "default" when type is missing or unknown.
  */
-export function resolveTemplate(templateType?: string, templateCustom?: string): DocTemplate {
+export function resolveTemplate(
+  templateType?: string,
+  templateCustom?: string,
+  objectType?: string,
+): DocTemplate {
   if (templateType === "custom" && templateCustom && templateCustom.trim().length > 0) {
     return {
       name: "Custom",
@@ -85,9 +125,18 @@ export function resolveTemplate(templateType?: string, templateCustom?: string):
     };
   }
 
-  if (templateType && TEMPLATES[templateType]) {
-    return TEMPLATES[templateType];
-  }
+  const config = (templateType && TEMPLATE_CONFIGS[templateType])
+    ? TEMPLATE_CONFIGS[templateType]
+    : TEMPLATE_CONFIGS["default"];
 
-  return TEMPLATES["default"];
+  const sections = isClassLike(objectType)
+    ? classSections(config.detail)
+    : reportSections(config.detail);
+
+  return {
+    name: config.name,
+    sections,
+    maxWords: config.maxWords,
+    maxOutputTokens: config.maxOutputTokens,
+  };
 }
