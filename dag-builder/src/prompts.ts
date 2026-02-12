@@ -62,6 +62,9 @@ export function buildDocPrompt(
     : rootNode.type === "INTF" ? "ABAP interface"
     : rootNode.type === "FUGR" ? "ABAP function group"
     : rootNode.type === "PROG" ? "ABAP report/program"
+    : rootNode.type === "DDLS" ? "CDS view"
+    : rootNode.type === "DDLX" ? "CDS metadata extension"
+    : rootNode.type === "DCLS" ? "CDS access control"
     : "ABAP object";
 
   const system = [

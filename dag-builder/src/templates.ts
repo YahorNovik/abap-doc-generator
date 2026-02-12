@@ -82,6 +82,40 @@ function reportSections(detail: "default" | "minimal" | "detailed"): string {
   ].join("\n");
 }
 
+function cdsSections(detail: "default" | "minimal" | "detailed"): string {
+  if (detail === "minimal") {
+    return [
+      "Generate concise documentation with these sections:",
+      "1. **Overview** — one paragraph describing purpose and what data the view exposes",
+      "2. **Definition** — fields with types, associations, parameters (if any), key annotations, and underlying data sources (tables/views)",
+    ].join("\n");
+  }
+
+  if (detail === "detailed") {
+    return [
+      "Generate comprehensive documentation with these sections:",
+      "1. **Overview** — purpose, what data it exposes, business context, and design rationale (1-2 paragraphs)",
+      "2. **Definition** — describe in detail:",
+      "   - Fields: name, type, description, calculated/aggregated fields",
+      "   - Associations: relationships to other CDS views or tables, cardinality",
+      "   - Parameters: input parameters and their purpose (if parameterized)",
+      "   - Annotations: key annotations (OData, UI, Analytics, Search, ObjectModel) and their effect",
+      "   - Data sources: underlying tables and views it selects from, join conditions",
+      "3. **Where-Used** — what consumes this view (other CDS views, OData services, Fiori apps, ABAP programs). Use the get_where_used tool to retrieve this information.",
+      "4. **Notes** — design decisions, limitations, performance considerations, access control",
+    ].join("\n");
+  }
+
+  // default
+  return [
+    "Generate documentation with these sections:",
+    "1. **Overview** — purpose and what data the view exposes (1-2 paragraphs)",
+    "2. **Definition** — fields with types, associations, parameters (if any), key annotations, and underlying data sources (tables/views)",
+    "3. **Where-Used** — what consumes this view. Use the get_where_used tool to retrieve this information.",
+    "4. **Notes** — design decisions, limitations, edge cases",
+  ].join("\n");
+}
+
 // ─── Detail-level configs ───
 
 interface TemplateConfig {
@@ -97,13 +131,14 @@ const TEMPLATE_CONFIGS: Record<string, TemplateConfig> = {
   detailed: { name: "Detailed", detail: "detailed", maxWords: 5000, maxOutputTokens: 16384 },
 };
 
-/**
- * Returns true if the object type represents a class or interface.
- */
-function isClassLike(objectType?: string): boolean {
-  if (!objectType) return true;
+type ObjectCategory = "class" | "report" | "cds";
+
+function categorizeObjectType(objectType?: string): ObjectCategory {
+  if (!objectType) return "class";
   const t = objectType.toUpperCase();
-  return t === "CLAS" || t === "INTF";
+  if (t === "CLAS" || t === "INTF") return "class";
+  if (t === "DDLS" || t === "DDLX" || t === "DCLS") return "cds";
+  return "report";
 }
 
 /**
@@ -129,8 +164,9 @@ export function resolveTemplate(
     ? TEMPLATE_CONFIGS[templateType]
     : TEMPLATE_CONFIGS["default"];
 
-  const sections = isClassLike(objectType)
-    ? classSections(config.detail)
+  const category = categorizeObjectType(objectType);
+  const sections = category === "class" ? classSections(config.detail)
+    : category === "cds" ? cdsSections(config.detail)
     : reportSections(config.detail);
 
   return {

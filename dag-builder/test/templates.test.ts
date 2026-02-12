@@ -81,6 +81,40 @@ describe("resolveTemplate — report/FM", () => {
   });
 });
 
+describe("resolveTemplate — CDS view", () => {
+  it("includes Definition section for DDLS", () => {
+    const tmpl = resolveTemplate("default", undefined, "DDLS");
+    expect(tmpl.sections).toContain("Definition");
+    expect(tmpl.sections).toContain("Where-Used");
+    expect(tmpl.sections).not.toContain("Methods");
+    expect(tmpl.sections).not.toContain("Logic");
+  });
+
+  it("works for DDLX (metadata extension)", () => {
+    const tmpl = resolveTemplate("default", undefined, "DDLX");
+    expect(tmpl.sections).toContain("Definition");
+  });
+
+  it("works for DCLS (access control)", () => {
+    const tmpl = resolveTemplate("default", undefined, "DCLS");
+    expect(tmpl.sections).toContain("Definition");
+  });
+
+  it("minimal CDS template has Overview and Definition", () => {
+    const tmpl = resolveTemplate("minimal", undefined, "DDLS");
+    expect(tmpl.sections).toContain("Overview");
+    expect(tmpl.sections).toContain("Definition");
+    expect(tmpl.sections).not.toContain("Where-Used");
+  });
+
+  it("detailed CDS template includes annotations and data sources", () => {
+    const tmpl = resolveTemplate("detailed", undefined, "DDLS");
+    expect(tmpl.sections).toContain("Annotations");
+    expect(tmpl.sections).toContain("Data sources");
+    expect(tmpl.sections).toContain("Where-Used");
+  });
+});
+
 describe("resolveTemplate — fallback and custom", () => {
   it("falls back to default when no type specified", () => {
     const tmpl = resolveTemplate();
