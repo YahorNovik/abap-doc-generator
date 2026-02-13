@@ -1,6 +1,7 @@
 import { createConnectedClient, fetchSourceForNodes } from "./dag-builder";
 import { fetchPackageObjects, buildPackageGraph, detectClusters } from "./package-graph";
-import { callLlm, callLlmAgentLoop } from "./llm-client";
+import { callLlm, callLlmAgentLoop, runBatch } from "./llm-client";
+import { computeTopologicalLevels } from "./doc-generator";
 import {
   buildSummaryPrompt, buildDocPrompt,
   buildClusterSummaryPrompt, buildPackageOverviewPrompt,
@@ -9,7 +10,7 @@ import { AGENT_TOOLS } from "./tools";
 import { resolveTemplate, PACKAGE_OVERVIEW_MAX_TOKENS, CLUSTER_SUMMARY_MAX_TOKENS } from "./templates";
 import {
   PackageDocInput, PackageDocResult, PackageObject, PackageGraph, Cluster,
-  DagEdge, DagNode, LlmConfig, ToolCall,
+  DagEdge, DagNode, LlmConfig, ToolCall, BatchRequest,
 } from "./types";
 
 const MAX_PACKAGE_OBJECTS = 100;
@@ -88,35 +89,85 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       }
       const objectMap = new Map(cluster.objects.map((o) => [o.name, o]));
 
-      // 5a. Summarize each object in topological order
-      for (const name of cluster.topologicalOrder) {
-        const obj = objectMap.get(name);
-        if (!obj) continue;
-        const source = sources.get(name);
-        if (!source) {
-          errors.push(`No source for ${name}, skipping.`);
-          continue;
+      // 5a. Summarize each object — batch by topological level
+      const useBatch = input.mode === "batch";
+      if (useBatch) {
+        const levels = computeTopologicalLevels(cluster.topologicalOrder, edgesByFrom, "");
+        const maxLevel = cluster.topologicalOrder.length > 0
+          ? Math.max(0, ...Array.from(levels.values()))
+          : 0;
+        log(`  Computed ${maxLevel + 1} topological level(s) for batch summarization.`);
+
+        for (let level = 0; level <= maxLevel; level++) {
+          const nodesAtLevel = cluster.topologicalOrder.filter((n) => levels.get(n) === level);
+          if (nodesAtLevel.length === 0) continue;
+
+          log(`  Level ${level}: ${nodesAtLevel.length} node(s) — submitting batch...`);
+          const batchRequests: BatchRequest[] = [];
+          for (const name of nodesAtLevel) {
+            const obj = objectMap.get(name);
+            if (!obj) continue;
+            const source = sources.get(name);
+            if (!source) {
+              errors.push(`No source for ${name}, skipping.`);
+              continue;
+            }
+            const edges = edgesByFrom.get(name) ?? [];
+            const depSums = edges
+              .filter((e) => summaries[e.to])
+              .map((e) => ({ name: e.to, summary: summaries[e.to] }));
+            const dagNode: DagNode = {
+              name, type: obj.type, isCustom: true, sourceAvailable: true,
+              usedBy: cluster.internalEdges.filter((e) => e.to === name).map((e) => e.from),
+            };
+            batchRequests.push({ id: name, messages: buildSummaryPrompt(dagNode, source, depSums) });
+          }
+
+          if (batchRequests.length === 0) continue;
+          try {
+            const results = await runBatch(input.summaryLlm, batchRequests);
+            for (const [name, response] of results) {
+              summaries[name] = response.content;
+              summaryTokens += response.usage.promptTokens + response.usage.completionTokens;
+            }
+            log(`  Level ${level}: ${results.size} summaries received.`);
+          } catch (err) {
+            errors.push(`Batch failed for level ${level}: ${String(err)}`);
+            for (const req of batchRequests) {
+              summaries[req.id] = `[Batch summary unavailable: ${String(err)}]`;
+            }
+          }
         }
+      } else {
+        for (const name of cluster.topologicalOrder) {
+          const obj = objectMap.get(name);
+          if (!obj) continue;
+          const source = sources.get(name);
+          if (!source) {
+            errors.push(`No source for ${name}, skipping.`);
+            continue;
+          }
 
-        const edges = edgesByFrom.get(name) ?? [];
-        const depSums = edges
-          .filter((e) => summaries[e.to])
-          .map((e) => ({ name: e.to, summary: summaries[e.to] }));
+          const edges = edgesByFrom.get(name) ?? [];
+          const depSums = edges
+            .filter((e) => summaries[e.to])
+            .map((e) => ({ name: e.to, summary: summaries[e.to] }));
 
-        const dagNode: DagNode = {
-          name, type: obj.type, isCustom: true, sourceAvailable: true,
-          usedBy: cluster.internalEdges.filter((e) => e.to === name).map((e) => e.from),
-        };
+          const dagNode: DagNode = {
+            name, type: obj.type, isCustom: true, sourceAvailable: true,
+            usedBy: cluster.internalEdges.filter((e) => e.to === name).map((e) => e.from),
+          };
 
-        const messages = buildSummaryPrompt(dagNode, source, depSums);
-        try {
-          const response = await callLlm(input.summaryLlm, messages);
-          summaries[name] = response.content;
-          summaryTokens += response.usage.promptTokens + response.usage.completionTokens;
-          log(`  Summarized ${name}`);
-        } catch (err) {
-          summaries[name] = `[Summary unavailable: ${String(err)}]`;
-          errors.push(`Failed to summarize ${name}: ${String(err)}`);
+          const messages = buildSummaryPrompt(dagNode, source, depSums);
+          try {
+            const response = await callLlm(input.summaryLlm, messages);
+            summaries[name] = response.content;
+            summaryTokens += response.usage.promptTokens + response.usage.completionTokens;
+            log(`  Summarized ${name}`);
+          } catch (err) {
+            summaries[name] = `[Summary unavailable: ${String(err)}]`;
+            errors.push(`Failed to summarize ${name}: ${String(err)}`);
+          }
         }
       }
 
