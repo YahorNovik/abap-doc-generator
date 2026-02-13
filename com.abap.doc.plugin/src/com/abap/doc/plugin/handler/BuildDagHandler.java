@@ -22,6 +22,7 @@ import org.eclipse.ui.handlers.HandlerUtil;
 import org.eclipse.ui.ide.IDE;
 
 import com.abap.doc.plugin.Activator;
+import com.abap.doc.plugin.PluginConsole;
 import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
 
@@ -75,11 +76,17 @@ public class BuildDagHandler extends AbstractHandler {
             @Override
             protected IStatus run(IProgressMonitor monitor) {
                 monitor.beginTask("Building dependency graph for " + fObjectName, IProgressMonitor.UNKNOWN);
+                PluginConsole.clear();
+                PluginConsole.show();
+                PluginConsole.println("Building dependency graph for " + fObjectName + " (" + fObjectType + ")");
                 try {
                     DagRunner runner = new DagRunner();
                     String resultJson = runner.buildDag(systemUrl, client, username, password,
                         fObjectName, fObjectType,
-                        line -> monitor.subTask(line));
+                        line -> {
+                            monitor.subTask(line);
+                            PluginConsole.println(line);
+                        });
 
                     // Pretty-print JSON (basic indentation)
                     String prettyJson = prettyPrintJson(resultJson);

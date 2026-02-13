@@ -23,6 +23,7 @@ import org.eclipse.ui.handlers.HandlerUtil;
 import org.eclipse.ui.ide.IDE;
 
 import com.abap.doc.plugin.Activator;
+import com.abap.doc.plugin.PluginConsole;
 import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
 
@@ -99,6 +100,9 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             @Override
             protected IStatus run(IProgressMonitor monitor) {
                 monitor.beginTask("Generating package documentation for " + packageName, IProgressMonitor.UNKNOWN);
+                PluginConsole.clear();
+                PluginConsole.show();
+                PluginConsole.println("Generating package documentation for " + packageName);
                 try {
                     DagRunner runner = new DagRunner();
                     String resultJson = runner.generatePackageDoc(
@@ -108,7 +112,10 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         docProvider, docApiKey, docModel, docBaseUrl,
                         fMode, fMaxTotalTokens,
                         fTemplateType, fTemplateCustom,
-                        line -> monitor.subTask(line));
+                        line -> {
+                            monitor.subTask(line);
+                            PluginConsole.println(line);
+                        });
 
                     // Extract documentation field from JSON result
                     String documentation = extractDocumentation(resultJson);
