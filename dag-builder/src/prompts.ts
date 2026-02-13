@@ -13,7 +13,7 @@ export function buildSummaryPrompt(
   const system = [
     "You are an ABAP documentation assistant.",
     "Summarize this ABAP object concisely.",
-    "Focus on: purpose, public API (key methods/types), and behavior.",
+    "Focus on: purpose, key capabilities, and business behavior.",
     "Keep it under 200 words. Output plain text, no Markdown headers.",
   ].join(" ");
 
@@ -79,6 +79,10 @@ export function buildDocPrompt(
     template.sections,
     "",
     `Keep the documentation under ${template.maxWords} words. Be thorough but concise.`,
+    "",
+    "## Formatting",
+    "",
+    "Output clean Markdown. Use `#` for the object name heading, `##` for sections. Do not number the section headings — the heading level provides structure. Use `-` for bullet lists. Use `backticks` for ABAP names inline.",
     "",
     "## Available Tools",
     "",
