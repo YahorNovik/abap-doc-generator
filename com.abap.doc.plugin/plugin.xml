@@ -43,7 +43,7 @@
         </category>
         <view
             id="com.abap.doc.chat.chatView"
-            name="ABAP Doc Chat"
+            name="ABAP Doc"
             class="com.abap.doc.plugin.chat.ChatView"
             category="com.abap.doc.views.category"
             allowMultiple="false">
@@ -102,7 +102,7 @@
                 </command>
                 <command
                     commandId="com.abap.doc.command.openChat"
-                    label="Open Chat"
+                    label="Open ABAP Doc View"
                     style="push">
                 </command>
             </menu>

@@ -25,12 +25,17 @@ public class SaveDocHandler extends AbstractHandler {
     @Override
     public Object execute(ExecutionEvent event) throws ExecutionException {
         Shell shell = HandlerUtil.getActiveShell(event);
+        performSave(shell);
+        return null;
+    }
+
+    public static void performSave(Shell shell) {
         GenerationResult gr = GenerationResult.getInstance();
 
         if (!gr.hasResult()) {
             MessageDialog.openError(shell, "ABAP Doc Generator",
                 "No documentation to save. Generate documentation first.");
-            return null;
+            return;
         }
 
         IPreferenceStore store = Activator.getDefault().getPreferenceStore();
@@ -45,7 +50,7 @@ public class SaveDocHandler extends AbstractHandler {
 
         String selectedPath = dirDialog.open();
         if (selectedPath == null) {
-            return null;
+            return;
         }
 
         try {
@@ -75,7 +80,5 @@ public class SaveDocHandler extends AbstractHandler {
             MessageDialog.openError(shell, "ABAP Doc Generator",
                 "Failed to save documentation: " + e.getMessage());
         }
-
-        return null;
     }
 }

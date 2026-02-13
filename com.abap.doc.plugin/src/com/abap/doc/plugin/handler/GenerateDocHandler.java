@@ -17,14 +17,14 @@ import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorPart;
+import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
-import org.eclipse.ui.browser.IWebBrowser;
-import org.eclipse.ui.browser.IWorkbenchBrowserSupport;
 import org.eclipse.ui.handlers.HandlerUtil;
 
 import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.GenerationResult;
 import com.abap.doc.plugin.PluginConsole;
+import com.abap.doc.plugin.chat.ChatView;
 import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
 
@@ -176,12 +176,10 @@ public class GenerateDocHandler extends AbstractHandler {
 
                         display.asyncExec(() -> {
                             try {
-                                IWorkbenchBrowserSupport support = PlatformUI.getWorkbench().getBrowserSupport();
-                                IWebBrowser browser = support.createBrowser(
-                                    IWorkbenchBrowserSupport.AS_EDITOR | IWorkbenchBrowserSupport.LOCATION_BAR,
-                                    "abap-doc-" + fObjectName,
-                                    fObjectName + " Documentation", null);
-                                browser.openURL(tempFile.toURI().toURL());
+                                IWorkbenchPage page = PlatformUI.getWorkbench()
+                                    .getActiveWorkbenchWindow().getActivePage();
+                                ChatView view = (ChatView) page.showView(ChatView.ID);
+                                view.showHtml(html);
                                 MessageDialog.openInformation(shell, "ABAP Doc Generator",
                                     "Documentation generated for " + fObjectName + "\n\n" + tokenInfo);
                             } catch (Exception e) {

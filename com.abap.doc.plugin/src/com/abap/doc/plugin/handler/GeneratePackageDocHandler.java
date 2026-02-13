@@ -19,14 +19,14 @@ import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
+import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
-import org.eclipse.ui.browser.IWebBrowser;
-import org.eclipse.ui.browser.IWorkbenchBrowserSupport;
 import org.eclipse.ui.handlers.HandlerUtil;
 
 import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.GenerationResult;
 import com.abap.doc.plugin.PluginConsole;
+import com.abap.doc.plugin.chat.ChatView;
 import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
 
@@ -146,7 +146,6 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                             File pageFile = new File(tempDir, entry.getKey());
                             Files.writeString(pageFile.toPath(), entry.getValue(), StandardCharsets.UTF_8);
                         }
-                        File indexFile = new File(tempDir, "index.html");
                         PluginConsole.println("HTML wiki written to " + tempDir.getAbsolutePath()
                             + " (" + pages.size() + " pages)");
 
@@ -172,12 +171,10 @@ public class GeneratePackageDocHandler extends AbstractHandler {
 
                         display.asyncExec(() -> {
                             try {
-                                IWorkbenchBrowserSupport support = PlatformUI.getWorkbench().getBrowserSupport();
-                                IWebBrowser browser = support.createBrowser(
-                                    IWorkbenchBrowserSupport.AS_EDITOR | IWorkbenchBrowserSupport.LOCATION_BAR,
-                                    "abap-pkg-doc-" + packageName,
-                                    packageName + " Documentation", null);
-                                browser.openURL(indexFile.toURI().toURL());
+                                IWorkbenchPage page = PlatformUI.getWorkbench()
+                                    .getActiveWorkbenchWindow().getActivePage();
+                                ChatView view = (ChatView) page.showView(ChatView.ID);
+                                view.showPackageDoc(tempDir);
                                 MessageDialog.openInformation(shell, "ABAP Doc Generator",
                                     "Package documentation generated for " + packageName + "\n\n" + tokenInfo);
                             } catch (Exception e) {
