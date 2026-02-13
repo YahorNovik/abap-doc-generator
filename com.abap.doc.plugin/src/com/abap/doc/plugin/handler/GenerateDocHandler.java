@@ -16,10 +16,10 @@ import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorPart;
-import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.browser.IWebBrowser;
+import org.eclipse.ui.browser.IWorkbenchBrowserSupport;
 import org.eclipse.ui.handlers.HandlerUtil;
-import org.eclipse.ui.ide.IDE;
 
 import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.PluginConsole;
@@ -127,32 +127,56 @@ public class GenerateDocHandler extends AbstractHandler {
                             PluginConsole.println(line);
                         });
 
-                    // Extract documentation field from JSON result
-                    String documentation = extractDocumentation(resultJson);
-
                     // Extract token usage for display
                     String tokenInfo = extractTokenUsage(resultJson);
 
-                    // Write Markdown to temp file and open in editor
-                    File tempFile = File.createTempFile("doc-" + fObjectName + "-", ".md");
-                    tempFile.deleteOnExit();
-                    Files.writeString(tempFile.toPath(), documentation, StandardCharsets.UTF_8);
+                    // Try HTML first, fall back to markdown
+                    String html = extractHtmlField(resultJson);
 
-                    display.asyncExec(() -> {
-                        try {
-                            IWorkbenchPage page = PlatformUI.getWorkbench()
-                                .getActiveWorkbenchWindow().getActivePage();
-                            IDE.openEditorOnFileStore(page,
-                                org.eclipse.core.filesystem.EFS.getLocalFileSystem()
-                                    .fromLocalFile(tempFile));
-                            // Show token usage info
-                            MessageDialog.openInformation(shell, "ABAP Doc Generator",
-                                "Documentation generated for " + fObjectName + "\n\n" + tokenInfo);
-                        } catch (Exception e) {
-                            MessageDialog.openError(shell, "ABAP Doc Generator",
-                                "Failed to open result: " + e.getMessage());
-                        }
-                    });
+                    if (html != null) {
+                        // Write HTML to temp file and open in browser
+                        File tempFile = File.createTempFile("doc-" + fObjectName + "-", ".html");
+                        tempFile.deleteOnExit();
+                        Files.writeString(tempFile.toPath(), html, StandardCharsets.UTF_8);
+                        PluginConsole.println("HTML written to " + tempFile.getAbsolutePath());
+
+                        display.asyncExec(() -> {
+                            try {
+                                IWorkbenchBrowserSupport support = PlatformUI.getWorkbench().getBrowserSupport();
+                                IWebBrowser browser = support.createBrowser(
+                                    IWorkbenchBrowserSupport.AS_EDITOR | IWorkbenchBrowserSupport.LOCATION_BAR,
+                                    "abap-doc-" + fObjectName,
+                                    fObjectName + " Documentation", null);
+                                browser.openURL(tempFile.toURI().toURL());
+                                MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                                    "Documentation generated for " + fObjectName + "\n\n" + tokenInfo);
+                            } catch (Exception e) {
+                                MessageDialog.openError(shell, "ABAP Doc Generator",
+                                    "Failed to open result: " + e.getMessage());
+                            }
+                        });
+                    } else {
+                        // Fallback: open markdown in editor
+                        String documentation = extractDocumentation(resultJson);
+                        File tempFile = File.createTempFile("doc-" + fObjectName + "-", ".md");
+                        tempFile.deleteOnExit();
+                        Files.writeString(tempFile.toPath(), documentation, StandardCharsets.UTF_8);
+
+                        display.asyncExec(() -> {
+                            try {
+                                org.eclipse.ui.IWorkbenchPage page = PlatformUI.getWorkbench()
+                                    .getActiveWorkbenchWindow().getActivePage();
+                                org.eclipse.ui.ide.IDE.openEditorOnFileStore(page,
+                                    org.eclipse.core.filesystem.EFS.getLocalFileSystem()
+                                        .fromLocalFile(tempFile));
+                                MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                                    "Documentation generated for " + fObjectName + "\n\n" + tokenInfo);
+                            } catch (Exception e) {
+                                MessageDialog.openError(shell, "ABAP Doc Generator",
+                                    "Failed to open result: " + e.getMessage());
+                            }
+                        });
+                    }
 
                     return Status.OK_STATUS;
                 } catch (Exception e) {
@@ -169,6 +193,42 @@ public class GenerateDocHandler extends AbstractHandler {
         job.schedule();
 
         return null;
+    }
+
+    /**
+     * Extracts the "html" field from the JSON result.
+     * Returns null if not present.
+     */
+    private static String extractHtmlField(String json) {
+        String key = "\"html\":\"";
+        int start = json.indexOf(key);
+        if (start == -1) return null;
+        start += key.length();
+
+        StringBuilder sb = new StringBuilder();
+        boolean escaped = false;
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escaped) {
+                switch (c) {
+                    case 'n': sb.append('\n'); break;
+                    case 't': sb.append('\t'); break;
+                    case 'r': sb.append('\r'); break;
+                    case '"': sb.append('"'); break;
+                    case '\\': sb.append('\\'); break;
+                    case '/': sb.append('/'); break;
+                    default: sb.append('\\').append(c);
+                }
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                break;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**

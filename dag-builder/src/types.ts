@@ -86,6 +86,7 @@ export interface DocInput {
 export interface DocResult {
   objectName: string;
   documentation: string;
+  html: string;
   summaries: Record<string, string>;
   tokenUsage: {
     summaryTokens: number;
@@ -143,6 +144,7 @@ export interface Cluster {
 export interface PackageDocResult {
   packageName: string;
   documentation: string;
+  pages: Record<string, string>;
   objectCount: number;
   clusterCount: number;
   summaries: Record<string, string>;

@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@abaplint/core": "^2.115.0",
-    "abap-adt-api": "^6.0.0"
+    "abap-adt-api": "^6.0.0",
+    "marked": "^17.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

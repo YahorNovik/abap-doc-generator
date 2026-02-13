@@ -3,6 +3,7 @@ import { callLlm, callLlmAgentLoop, runBatch } from "./llm-client";
 import { buildSummaryPrompt, buildDocPrompt } from "./prompts";
 import { AGENT_TOOLS } from "./tools";
 import { resolveTemplate } from "./templates";
+import { renderSingleObjectHtml } from "./html-renderer";
 import { DocInput, DocResult, DagResult, DagEdge, DagNode, LlmConfig, BatchRequest, ToolCall } from "./types";
 
 const DEFAULT_MAX_ITERATIONS = 10;
@@ -80,9 +81,11 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
     const rootSource = sources.get(rootName);
 
     if (!rootNode || !rootSource) {
+      const errorMd = `# ${rootName}\n\nFailed to generate documentation: source code not available.`;
       return {
         objectName: rootName,
-        documentation: `# ${rootName}\n\nFailed to generate documentation: source code not available.`,
+        documentation: errorMd,
+        html: renderSingleObjectHtml(rootName, errorMd),
         summaries,
         tokenUsage: { summaryTokens, docTokens, totalTokens: summaryTokens, agentIterations: 0, toolCalls: 0 },
         errors: [...errors, "Root object source not available."],
@@ -161,6 +164,7 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
       return {
         objectName: rootName,
         documentation: response.content,
+        html: renderSingleObjectHtml(rootName, response.content),
         summaries,
         tokenUsage: {
           summaryTokens,
@@ -173,9 +177,11 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
       };
     } catch (err) {
       errors.push(`Failed to generate documentation: ${String(err)}`);
+      const errorMd = `# ${rootName}\n\nFailed to generate documentation: ${String(err)}`;
       return {
         objectName: rootName,
-        documentation: `# ${rootName}\n\nFailed to generate documentation: ${String(err)}`,
+        documentation: errorMd,
+        html: renderSingleObjectHtml(rootName, errorMd),
         summaries,
         tokenUsage: { summaryTokens, docTokens, totalTokens: summaryTokens + docTokens, agentIterations: 0, toolCalls: 0 },
         errors,

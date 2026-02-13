@@ -8,6 +8,7 @@ import {
 } from "./prompts";
 import { AGENT_TOOLS } from "./tools";
 import { resolveTemplate, PACKAGE_OVERVIEW_MAX_TOKENS, CLUSTER_SUMMARY_MAX_TOKENS } from "./templates";
+import { assembleHtmlWiki, renderSingleObjectHtml } from "./html-renderer";
 import {
   PackageDocInput, PackageDocResult, PackageObject, PackageGraph, Cluster,
   DagEdge, DagNode, LlmConfig, ToolCall, BatchRequest,
@@ -294,12 +295,18 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       input.packageName, overviewText, clusters, clusterSummaries, objectDocs, aggregatedExternalDeps,
     );
 
+    // 8. Build multi-page HTML wiki
+    const pages = assembleHtmlWiki(
+      input.packageName, overviewText, clusters, clusterSummaries, objectDocs, aggregatedExternalDeps,
+    );
+
     const totalTokens = summaryTokens + objectDocTokens + clusterSummaryTokens + overviewTokens;
-    log(`Package documentation complete. ${totalTokens} total tokens.`);
+    log(`Package documentation complete. ${totalTokens} total tokens. ${Object.keys(pages).length} HTML pages.`);
 
     return {
       packageName: input.packageName,
       documentation,
+      pages,
       objectCount: objects.length,
       clusterCount: clusters.length,
       summaries,
@@ -314,9 +321,11 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
 }
 
 function emptyResult(packageName: string, errors: string[]): PackageDocResult {
+  const emptyMd = `# Package ${packageName}\n\nNo relevant custom objects found in this package.`;
   return {
     packageName,
-    documentation: `# Package ${packageName}\n\nNo relevant custom objects found in this package.`,
+    documentation: emptyMd,
+    pages: { "index.html": renderSingleObjectHtml(packageName, emptyMd) },
     objectCount: 0,
     clusterCount: 0,
     summaries: {},

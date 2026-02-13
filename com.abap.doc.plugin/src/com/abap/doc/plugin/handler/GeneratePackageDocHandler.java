@@ -3,6 +3,8 @@ package com.abap.doc.plugin.handler;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
@@ -17,10 +19,10 @@ import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
-import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.browser.IWebBrowser;
+import org.eclipse.ui.browser.IWorkbenchBrowserSupport;
 import org.eclipse.ui.handlers.HandlerUtil;
-import org.eclipse.ui.ide.IDE;
 
 import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.PluginConsole;
@@ -117,31 +119,60 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                             PluginConsole.println(line);
                         });
 
-                    // Extract documentation field from JSON result
-                    String documentation = extractDocumentation(resultJson);
-
                     // Extract token usage for display
                     String tokenInfo = extractPackageTokenUsage(resultJson);
 
-                    // Write Markdown to temp file and open in editor
-                    File tempFile = File.createTempFile("pkg-doc-" + packageName + "-", ".md");
-                    tempFile.deleteOnExit();
-                    Files.writeString(tempFile.toPath(), documentation, StandardCharsets.UTF_8);
+                    // Extract multi-page HTML wiki
+                    Map<String, String> pages = extractPages(resultJson);
 
-                    display.asyncExec(() -> {
-                        try {
-                            IWorkbenchPage page = PlatformUI.getWorkbench()
-                                .getActiveWorkbenchWindow().getActivePage();
-                            IDE.openEditorOnFileStore(page,
-                                org.eclipse.core.filesystem.EFS.getLocalFileSystem()
-                                    .fromLocalFile(tempFile));
-                            MessageDialog.openInformation(shell, "ABAP Doc Generator",
-                                "Package documentation generated for " + packageName + "\n\n" + tokenInfo);
-                        } catch (Exception e) {
-                            MessageDialog.openError(shell, "ABAP Doc Generator",
-                                "Failed to open result: " + e.getMessage());
+                    if (!pages.isEmpty()) {
+                        // Write pages to temp directory and open in browser
+                        File tempDir = Files.createTempDirectory("pkg-doc-" + packageName + "-").toFile();
+                        for (Map.Entry<String, String> entry : pages.entrySet()) {
+                            File pageFile = new File(tempDir, entry.getKey());
+                            Files.writeString(pageFile.toPath(), entry.getValue(), StandardCharsets.UTF_8);
                         }
-                    });
+                        File indexFile = new File(tempDir, "index.html");
+                        PluginConsole.println("HTML wiki written to " + tempDir.getAbsolutePath()
+                            + " (" + pages.size() + " pages)");
+
+                        display.asyncExec(() -> {
+                            try {
+                                IWorkbenchBrowserSupport support = PlatformUI.getWorkbench().getBrowserSupport();
+                                IWebBrowser browser = support.createBrowser(
+                                    IWorkbenchBrowserSupport.AS_EDITOR | IWorkbenchBrowserSupport.LOCATION_BAR,
+                                    "abap-pkg-doc-" + packageName,
+                                    packageName + " Documentation", null);
+                                browser.openURL(indexFile.toURI().toURL());
+                                MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                                    "Package documentation generated for " + packageName + "\n\n" + tokenInfo);
+                            } catch (Exception e) {
+                                MessageDialog.openError(shell, "ABAP Doc Generator",
+                                    "Failed to open result: " + e.getMessage());
+                            }
+                        });
+                    } else {
+                        // Fallback: open markdown in editor
+                        String documentation = extractDocumentation(resultJson);
+                        File tempFile = File.createTempFile("pkg-doc-" + packageName + "-", ".md");
+                        tempFile.deleteOnExit();
+                        Files.writeString(tempFile.toPath(), documentation, StandardCharsets.UTF_8);
+
+                        display.asyncExec(() -> {
+                            try {
+                                org.eclipse.ui.IWorkbenchPage page = PlatformUI.getWorkbench()
+                                    .getActiveWorkbenchWindow().getActivePage();
+                                org.eclipse.ui.ide.IDE.openEditorOnFileStore(page,
+                                    org.eclipse.core.filesystem.EFS.getLocalFileSystem()
+                                        .fromLocalFile(tempFile));
+                                MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                                    "Package documentation generated for " + packageName + "\n\n" + tokenInfo);
+                            } catch (Exception e) {
+                                MessageDialog.openError(shell, "ABAP Doc Generator",
+                                    "Failed to open result: " + e.getMessage());
+                            }
+                        });
+                    }
 
                     return Status.OK_STATUS;
                 } catch (Exception e) {
@@ -230,5 +261,75 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         } catch (NumberFormatException e) {
             return 0;
         }
+    }
+
+    /**
+     * Extracts the "pages" object from JSON: {"pages":{"index.html":"<html>...","ZCL_FOO.html":"<html>..."}}
+     * Returns a map of filename → HTML content.
+     */
+    private static Map<String, String> extractPages(String json) {
+        Map<String, String> pages = new LinkedHashMap<>();
+        String key = "\"pages\":{";
+        int start = json.indexOf(key);
+        if (start == -1) return pages;
+        int pos = start + key.length();
+
+        while (pos < json.length()) {
+            // Skip whitespace and commas
+            while (pos < json.length() && (Character.isWhitespace(json.charAt(pos)) || json.charAt(pos) == ',')) {
+                pos++;
+            }
+            if (pos >= json.length() || json.charAt(pos) == '}') break;
+
+            // Opening quote for key
+            if (json.charAt(pos) != '"') break;
+            pos++;
+
+            // Extract filename key (simple string, no escaping needed)
+            int keyEnd = json.indexOf('"', pos);
+            if (keyEnd == -1) break;
+            String filename = json.substring(pos, keyEnd);
+            pos = keyEnd + 1;
+
+            // Skip colon and whitespace
+            while (pos < json.length() && (json.charAt(pos) == ':' || Character.isWhitespace(json.charAt(pos)))) {
+                pos++;
+            }
+
+            // Opening quote for value
+            if (pos >= json.length() || json.charAt(pos) != '"') break;
+            pos++;
+
+            // Extract value with escape handling
+            StringBuilder sb = new StringBuilder();
+            boolean escaped = false;
+            while (pos < json.length()) {
+                char c = json.charAt(pos);
+                if (escaped) {
+                    switch (c) {
+                        case 'n': sb.append('\n'); break;
+                        case 't': sb.append('\t'); break;
+                        case 'r': sb.append('\r'); break;
+                        case '"': sb.append('"'); break;
+                        case '\\': sb.append('\\'); break;
+                        case '/': sb.append('/'); break;
+                        default: sb.append('\\').append(c);
+                    }
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    pos++;
+                    break;
+                } else {
+                    sb.append(c);
+                }
+                pos++;
+            }
+
+            pages.put(filename, sb.toString());
+        }
+
+        return pages;
     }
 }
