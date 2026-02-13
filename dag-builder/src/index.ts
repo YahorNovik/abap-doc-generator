@@ -1,5 +1,6 @@
 import { buildDag } from "./dag-builder";
 import { generateDocumentation } from "./doc-generator";
+import { generatePackageDocumentation } from "./package-doc-generator";
 
 async function main(): Promise<void> {
   const raw = await readStdin();
@@ -12,13 +13,24 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (!input.systemUrl || !input.objectName) {
-    process.stderr.write("Error: systemUrl and objectName are required\n");
+  if (!input.systemUrl || (!input.objectName && !input.packageName)) {
+    process.stderr.write("Error: systemUrl and objectName (or packageName) are required\n");
     process.exit(1);
   }
 
   try {
-    if (input.command === "generate-doc") {
+    if (input.command === "generate-package-doc") {
+      if (!input.summaryLlm || !input.docLlm) {
+        process.stderr.write("Error: summaryLlm and docLlm configs are required for generate-package-doc\n");
+        process.exit(1);
+      }
+      if (!input.packageName) {
+        process.stderr.write("Error: packageName is required for generate-package-doc\n");
+        process.exit(1);
+      }
+      const result = await generatePackageDocumentation(input);
+      process.stdout.write(JSON.stringify(result));
+    } else if (input.command === "generate-doc") {
       if (!input.summaryLlm || !input.docLlm) {
         process.stderr.write("Error: summaryLlm and docLlm configs are required for generate-doc\n");
         process.exit(1);

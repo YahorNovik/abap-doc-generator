@@ -18,6 +18,11 @@
             name="Generate ABAP Documentation"
             categoryId="com.abap.doc.commands.category">
         </command>
+        <command
+            id="com.abap.doc.command.generatePackageDoc"
+            name="Generate Package Documentation"
+            categoryId="com.abap.doc.commands.category">
+        </command>
     </extension>
 
     <!-- Menu contributions: context menu + main menu -->
@@ -29,6 +34,11 @@
             <command
                 commandId="com.abap.doc.command.generateDoc"
                 label="Generate ABAP Documentation"
+                style="push">
+            </command>
+            <command
+                commandId="com.abap.doc.command.generatePackageDoc"
+                label="Generate Package Documentation"
                 style="push">
             </command>
             <command
@@ -50,6 +60,11 @@
                     style="push">
                 </command>
                 <command
+                    commandId="com.abap.doc.command.generatePackageDoc"
+                    label="Generate Package Documentation"
+                    style="push">
+                </command>
+                <command
                     commandId="com.abap.doc.command.buildDag"
                     label="Build Dependency Graph"
                     style="push">
@@ -68,6 +83,10 @@
             class="com.abap.doc.plugin.handler.GenerateDocHandler"
             commandId="com.abap.doc.command.generateDoc">
         </handler>
+        <handler
+            class="com.abap.doc.plugin.handler.GeneratePackageDocHandler"
+            commandId="com.abap.doc.command.generatePackageDoc">
+        </handler>
     </extension>
 
     <!-- Keybindings -->
@@ -83,6 +102,12 @@
             commandId="com.abap.doc.command.buildDag"
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
             sequence="M1+M2+G">
+        </key>
+        <!-- Ctrl+Shift+P: Generate Package Documentation -->
+        <key
+            commandId="com.abap.doc.command.generatePackageDoc"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+P">
         </key>
     </extension>
 

@@ -65,6 +65,24 @@ export class AdtClientWrapper {
   }
 
   /**
+   * Fetches the contents of an ABAP package (development class).
+   */
+  async getPackageContents(packageName: string): Promise<Array<{
+    objectType: string;
+    objectName: string;
+    objectUri: string;
+    description: string;
+  }>> {
+    const result = await (this.client as any).nodeContents("DEVC/K", packageName);
+    return result.nodes.map((node: any) => ({
+      objectType: node.OBJECT_TYPE ?? "",
+      objectName: node.OBJECT_NAME ?? "",
+      objectUri: node.OBJECT_URI ?? "",
+      description: node.DESCRIPTION ?? "",
+    }));
+  }
+
+  /**
    * Resolves the ADT URI for an object via search.
    */
   private async resolveObjectUrl(objectName: string): Promise<string | undefined> {

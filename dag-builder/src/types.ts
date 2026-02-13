@@ -97,6 +97,67 @@ export interface DocResult {
   errors: string[];
 }
 
+// ─── Package documentation types ───
+
+export interface PackageDocInput {
+  command: "generate-package-doc";
+  systemUrl: string;
+  client: string;
+  username: string;
+  password: string;
+  packageName: string;
+  summaryLlm: LlmConfig;
+  docLlm: LlmConfig;
+  mode?: "realtime" | "batch";
+  maxTotalTokens?: number;
+  templateType?: "default" | "minimal" | "detailed" | "custom";
+  templateCustom?: string;
+}
+
+export interface PackageObject {
+  name: string;
+  type: string;
+  description: string;
+  uri: string;
+}
+
+export interface PackageGraph {
+  objects: PackageObject[];
+  internalEdges: DagEdge[];
+  externalDependencies: Array<{
+    from: string;
+    to: string;
+    toType: string;
+    references: MemberReference[];
+  }>;
+}
+
+export interface Cluster {
+  id: number;
+  name: string;
+  objects: PackageObject[];
+  internalEdges: DagEdge[];
+  topologicalOrder: string[];
+}
+
+export interface PackageDocResult {
+  packageName: string;
+  documentation: string;
+  objectCount: number;
+  clusterCount: number;
+  summaries: Record<string, string>;
+  clusterSummaries: Record<string, string>;
+  objectDocs: Record<string, string>;
+  tokenUsage: {
+    summaryTokens: number;
+    objectDocTokens: number;
+    clusterSummaryTokens: number;
+    overviewTokens: number;
+    totalTokens: number;
+  };
+  errors: string[];
+}
+
 // ─── Agent / Tool types ───
 
 export interface ToolDefinition {

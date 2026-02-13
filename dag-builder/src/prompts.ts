@@ -1,4 +1,4 @@
-import { DagNode, DagEdge, LlmMessage } from "./types";
+import { DagNode, DagEdge, LlmMessage, PackageObject } from "./types";
 import { DocTemplate } from "./templates";
 
 /**
@@ -137,6 +137,104 @@ export function buildDocPrompt(
 
   parts.push("");
   parts.push("Generate the documentation following the output structure from the system instructions.");
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: parts.join("\n") },
+  ];
+}
+
+/**
+ * Builds prompt for generating a cluster summary from individual object summaries.
+ * Used with the cheap/fast model. First line of response = suggested cluster name.
+ */
+export function buildClusterSummaryPrompt(
+  clusterObjects: Array<{ name: string; type: string; summary: string }>,
+  clusterEdges: DagEdge[],
+): LlmMessage[] {
+  const system = [
+    "You are an ABAP documentation assistant.",
+    "Summarize this functional cluster of related ABAP objects.",
+    "Focus on: what this cluster does as a unit, the data/control flow between objects, and the business capability it provides.",
+    "First line: suggest a short descriptive name for this cluster (3-5 words, no quotes).",
+    "Then a blank line, then the summary.",
+    "Keep the summary under 300 words. Output plain text, no Markdown headers.",
+  ].join(" ");
+
+  const parts: string[] = [
+    `Cluster contains ${clusterObjects.length} objects:`,
+    "",
+  ];
+
+  for (const obj of clusterObjects) {
+    parts.push(`- ${obj.name} (${obj.type}): ${obj.summary}`);
+  }
+
+  if (clusterEdges.length > 0) {
+    parts.push("");
+    parts.push("Internal dependencies:");
+    for (const edge of clusterEdges) {
+      const refs = edge.references.map((r) => r.memberName).join(", ");
+      parts.push(`- ${edge.from} -> ${edge.to}${refs ? ` (uses: ${refs})` : ""}`);
+    }
+  }
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: parts.join("\n") },
+  ];
+}
+
+/**
+ * Builds prompt for generating the package-level overview from cluster summaries.
+ * Used with the capable model.
+ */
+export function buildPackageOverviewPrompt(
+  packageName: string,
+  clusterSummaries: Array<{ name: string; summary: string; objectCount: number }>,
+  externalDependencies: Array<{ name: string; type: string; usedBy: string[] }>,
+): LlmMessage[] {
+  const system = [
+    `You are an ABAP documentation expert. You are documenting ABAP package ${packageName}.`,
+    "Write a package-level overview covering:",
+    "",
+    "## Output Structure",
+    "",
+    "- **Overview** — What this package does from a business perspective. What business domain it serves. (1-2 paragraphs)",
+    "- **Architecture** — How the functional clusters relate to each other. Describe the high-level data flow, layers, and design patterns. (1-2 paragraphs)",
+    "",
+    "Keep the overview under 500 words. Be thorough but concise.",
+    "",
+    "## Formatting",
+    "",
+    "Output clean Markdown. Use `##` for section headings. Use `-` for bullet lists. Use `backticks` for ABAP names inline.",
+  ].join("\n");
+
+  const totalObjects = clusterSummaries.reduce((n, c) => n + c.objectCount, 0);
+  const parts: string[] = [
+    `# Package: ${packageName}`,
+    "",
+    `Contains ${totalObjects} objects in ${clusterSummaries.length} functional cluster(s).`,
+    "",
+    "## Functional Clusters",
+  ];
+
+  for (const cluster of clusterSummaries) {
+    parts.push("");
+    parts.push(`### ${cluster.name} (${cluster.objectCount} objects)`);
+    parts.push(cluster.summary);
+  }
+
+  if (externalDependencies.length > 0) {
+    parts.push("");
+    parts.push("## Key External Dependencies");
+    for (const dep of externalDependencies.slice(0, 20)) {
+      parts.push(`- ${dep.name} (${dep.type}) — used by: ${dep.usedBy.join(", ")}`);
+    }
+  }
+
+  parts.push("");
+  parts.push("Generate the package overview following the output structure from the system instructions.");
 
   return [
     { role: "system", content: system },

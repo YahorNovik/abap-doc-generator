@@ -5,6 +5,11 @@ export interface DocTemplate {
   maxOutputTokens: number;
 }
 
+// ─── Package-level token limits ───
+
+export const PACKAGE_OVERVIEW_MAX_TOKENS = 4096;
+export const CLUSTER_SUMMARY_MAX_TOKENS = 2048;
+
 // ─── Section builders by object type ───
 
 function classSections(detail: "default" | "minimal" | "detailed"): string {

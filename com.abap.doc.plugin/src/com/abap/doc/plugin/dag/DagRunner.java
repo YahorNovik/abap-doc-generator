@@ -66,6 +66,21 @@ public class DagRunner {
         return runScript(input, progressCallback);
     }
 
+    public String generatePackageDoc(String systemUrl, String client, String username, String password,
+                                     String packageName,
+                                     String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
+                                     String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                                     String mode, int maxTotalTokens,
+                                     String templateType, String templateCustom,
+                                     Consumer<String> progressCallback) throws IOException, InterruptedException {
+
+        String input = buildPackageDocInputJson(systemUrl, client, username, password, packageName,
+            summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
+            docProvider, docApiKey, docModel, docBaseUrl, mode, maxTotalTokens,
+            templateType, templateCustom);
+        return runScript(input, progressCallback);
+    }
+
     private String runScript(String input, Consumer<String> progressCallback) throws IOException, InterruptedException {
         String scriptPath = resolveScriptPath();
 
@@ -129,6 +144,51 @@ public class DagRunner {
         sb.append(",\"password\":\"").append(escapeJson(password)).append("\"");
         sb.append(",\"objectName\":\"").append(escapeJson(objectName)).append("\"");
         sb.append(",\"objectType\":\"").append(escapeJson(objectType)).append("\"");
+        sb.append(",\"summaryLlm\":{");
+        sb.append("\"provider\":\"").append(escapeJson(summaryProvider)).append("\"");
+        sb.append(",\"apiKey\":\"").append(escapeJson(summaryApiKey)).append("\"");
+        sb.append(",\"model\":\"").append(escapeJson(summaryModel)).append("\"");
+        if (summaryBaseUrl != null && !summaryBaseUrl.isEmpty()) {
+            sb.append(",\"baseUrl\":\"").append(escapeJson(summaryBaseUrl)).append("\"");
+        }
+        sb.append("}");
+        sb.append(",\"docLlm\":{");
+        sb.append("\"provider\":\"").append(escapeJson(docProvider)).append("\"");
+        sb.append(",\"apiKey\":\"").append(escapeJson(docApiKey)).append("\"");
+        sb.append(",\"model\":\"").append(escapeJson(docModel)).append("\"");
+        if (docBaseUrl != null && !docBaseUrl.isEmpty()) {
+            sb.append(",\"baseUrl\":\"").append(escapeJson(docBaseUrl)).append("\"");
+        }
+        sb.append("}");
+        if (mode != null && !mode.isEmpty()) {
+            sb.append(",\"mode\":\"").append(escapeJson(mode)).append("\"");
+        }
+        if (maxTotalTokens > 0) {
+            sb.append(",\"maxTotalTokens\":").append(maxTotalTokens);
+        }
+        if (templateType != null && !templateType.isEmpty()) {
+            sb.append(",\"templateType\":\"").append(escapeJson(templateType)).append("\"");
+        }
+        if (templateCustom != null && !templateCustom.isEmpty()) {
+            sb.append(",\"templateCustom\":\"").append(escapeJson(templateCustom)).append("\"");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private static String buildPackageDocInputJson(String systemUrl, String client, String username, String password,
+                                                    String packageName,
+                                                    String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
+                                                    String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                                                    String mode, int maxTotalTokens,
+                                                    String templateType, String templateCustom) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"command\":\"generate-package-doc\"");
+        sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
+        sb.append(",\"client\":\"").append(escapeJson(client)).append("\"");
+        sb.append(",\"username\":\"").append(escapeJson(username)).append("\"");
+        sb.append(",\"password\":\"").append(escapeJson(password)).append("\"");
+        sb.append(",\"packageName\":\"").append(escapeJson(packageName)).append("\"");
         sb.append(",\"summaryLlm\":{");
         sb.append("\"provider\":\"").append(escapeJson(summaryProvider)).append("\"");
         sb.append(",\"apiKey\":\"").append(escapeJson(summaryApiKey)).append("\"");
