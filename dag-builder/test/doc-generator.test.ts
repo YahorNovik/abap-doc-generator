@@ -124,6 +124,24 @@ describe("buildDocPrompt", () => {
     expect(sysMsg.content).not.toContain("Dependencies");
     expect(sysMsg.content).toContain("under 1000 words");
   });
+
+  it("should include pre-fetched where-used list in user message", () => {
+    const whereUsed = [
+      { name: "ZCL_CONSUMER", type: "CLAS", description: "Uses root for processing" },
+      { name: "ZCL_RUNNER", type: "CLAS", description: "" },
+    ];
+    const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate, whereUsed);
+    const userMsg = messages.find((m) => m.role === "user")!;
+    expect(userMsg.content).toContain("Where-Used List");
+    expect(userMsg.content).toContain("ZCL_CONSUMER (CLAS): Uses root for processing");
+    expect(userMsg.content).toContain("ZCL_RUNNER (CLAS)");
+  });
+
+  it("should show no references message when where-used is empty", () => {
+    const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate, []);
+    const userMsg = messages.find((m) => m.role === "user")!;
+    expect(userMsg.content).toContain("No where-used references found");
+  });
 });
 
 describe("bottom-up summary accumulation", () => {

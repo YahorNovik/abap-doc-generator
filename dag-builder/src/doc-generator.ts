@@ -103,12 +103,22 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
         })),
       }));
 
+    // Pre-fetch where-used list for root object (saves an agent round trip)
+    let whereUsedList: Array<{ name: string; type: string; description: string }> = [];
+    try {
+      log(`Fetching where-used list for ${rootName}...`);
+      whereUsedList = await adtClient.getWhereUsed(rootName);
+      log(`Where-used: ${whereUsedList.length} reference(s) found.`);
+    } catch (err) {
+      errors.push(`Failed to fetch where-used for ${rootName}: ${String(err)}`);
+    }
+
     // Resolve template and set appropriate maxOutputTokens for doc LLM
     const template = resolveTemplate(input.templateType, input.templateCustom, input.objectType);
     const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
     log(`Using template: ${template.name} (maxWords=${template.maxWords}, maxOutputTokens=${template.maxOutputTokens})`);
 
-    const docMessages = buildDocPrompt(rootNode, rootSource, depDetails, template);
+    const docMessages = buildDocPrompt(rootNode, rootSource, depDetails, template, whereUsedList);
 
     // Tool executor: gives the LLM access to ADT for on-demand source and where-used
     const toolExecutor = async (tc: ToolCall): Promise<string> => {

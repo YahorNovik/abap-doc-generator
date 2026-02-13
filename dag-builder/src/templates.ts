@@ -22,7 +22,7 @@ function classSections(detail: "default" | "minimal" | "detailed"): string {
       "1. **Overview** — what this class/interface does from a business perspective, what problem it solves, and its role in the application (1-2 paragraphs)",
       "2. **Functional Logic** — describe the business logic and key operations this class provides. Group by functional area, not by method name. Explain the processing flow, business rules, and decision logic. Mention method names only when they represent a distinct functional step.",
       "3. **Dependencies** — what other objects it relies on and what functional role each dependency plays in the overall logic",
-      "4. **Where-Used** — where this object is used in the system and for what functional purpose. Use the get_where_used tool to retrieve this information.",
+      "4. **Where-Used** — where this object is used in the system and for what functional purpose. Use the where-used data provided in the prompt.",
       "5. **Error Handling** — what can go wrong, what business validations are performed, and how errors are communicated to callers",
       "6. **Notes** — design decisions, business constraints, known limitations",
     ].join("\n");
@@ -34,7 +34,7 @@ function classSections(detail: "default" | "minimal" | "detailed"): string {
     "1. **Overview** — what this class/interface does from a business perspective, what problem it solves (1-2 paragraphs)",
     "2. **Functional Logic** — describe the business logic and key operations. Group by functional area, not by method name. Explain the processing flow and business rules. Mention method names only when they represent a distinct functional step.",
     "3. **Dependencies** — what other objects it relies on and what functional role each dependency plays",
-    "4. **Where-Used** — where this object is used and for what purpose. Use the get_where_used tool to retrieve this information.",
+    "4. **Where-Used** — where this object is used and for what purpose. Use the where-used data provided in the prompt.",
     "5. **Notes** — design decisions, limitations, edge cases",
   ].join("\n");
 }
@@ -55,7 +55,7 @@ function reportSections(detail: "default" | "minimal" | "detailed"): string {
       "2. **Input** — selection screen parameters and their business meaning (if applicable)",
       "3. **Processing Logic** — step-by-step explanation of the business logic, broken into functional steps. For each step explain what it does, what business rules apply, and what data is affected.",
       "4. **Dependencies** — what other objects it relies on and what functional role each plays",
-      "5. **Where-Used** — where this program/FM is called and in what business context. Use the get_where_used tool to retrieve this information.",
+      "5. **Where-Used** — where this program/FM is called and in what business context. Use the where-used data provided in the prompt.",
       "6. **Notes** — design decisions, business constraints, known limitations",
     ].join("\n");
   }
@@ -66,7 +66,7 @@ function reportSections(detail: "default" | "minimal" | "detailed"): string {
     "1. **Overview** — what this program does from a business perspective, what problem it solves (1-2 paragraphs)",
     "2. **Processing Logic** — step-by-step explanation of the business logic, broken into functional steps. For each step explain what it does and what business rules apply.",
     "3. **Dependencies** — what other objects it relies on and what functional role each plays",
-    "4. **Where-Used** — where this program/FM is called and for what purpose. Use the get_where_used tool to retrieve this information.",
+    "4. **Where-Used** — where this program/FM is called and for what purpose. Use the where-used data provided in the prompt.",
     "5. **Notes** — design decisions, limitations, edge cases",
   ].join("\n");
 }
@@ -85,7 +85,7 @@ function cdsSections(detail: "default" | "minimal" | "detailed"): string {
       "Generate comprehensive functional documentation with these sections:",
       "1. **Overview** — what business data this view exposes, for what purpose, and its role in the application (1-2 paragraphs)",
       "2. **Data Model** — what business data is provided, key fields and their business meaning, relationships to other entities, calculated/derived fields and their logic, parameters and their purpose, key annotations and their effect, underlying data sources",
-      "3. **Where-Used** — what consumes this view and for what business purpose (other CDS views, OData services, Fiori apps, reports). Use the get_where_used tool to retrieve this information.",
+      "3. **Where-Used** — what consumes this view and for what business purpose (other CDS views, OData services, Fiori apps, reports). Use the where-used data provided in the prompt.",
       "4. **Notes** — design decisions, performance considerations, access control, business constraints",
     ].join("\n");
   }
@@ -95,7 +95,7 @@ function cdsSections(detail: "default" | "minimal" | "detailed"): string {
     "Generate functional documentation with these sections:",
     "1. **Overview** — what business data this view exposes and for what purpose (1-2 paragraphs)",
     "2. **Data Model** — what data is provided, key fields and their business meaning, relationships to other entities, and underlying data sources",
-    "3. **Where-Used** — what consumes this view and for what purpose. Use the get_where_used tool to retrieve this information.",
+    "3. **Where-Used** — what consumes this view and for what purpose. Use the where-used data provided in the prompt.",
     "4. **Notes** — design decisions, limitations, edge cases",
   ].join("\n");
 }

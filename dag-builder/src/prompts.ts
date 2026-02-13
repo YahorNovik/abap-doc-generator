@@ -57,6 +57,7 @@ export function buildDocPrompt(
     usedMembers: Array<{ memberName: string; memberType: string }>;
   }>,
   template: DocTemplate,
+  whereUsedList?: Array<{ name: string; type: string; description: string }>,
 ): LlmMessage[] {
   const objectTypeLabel = rootNode.type === "CLAS" ? "ABAP class"
     : rootNode.type === "INTF" ? "ABAP interface"
@@ -87,7 +88,8 @@ export function buildDocPrompt(
     "",
     "Use these tools when you need additional context beyond what is already provided.",
     "Do not fetch source for objects whose source is already included in the prompt.",
-    "For the Where-Used section, always call get_where_used to get real data from the system.",
+    "The where-used list for the root object is already included in the prompt — do not call get_where_used for it.",
+    "Use get_where_used only if you need where-used data for other objects.",
   ].join("\n");
 
   const parts: string[] = [
@@ -114,6 +116,19 @@ export function buildDocPrompt(
         }
       }
     }
+  }
+
+  if (whereUsedList && whereUsedList.length > 0) {
+    parts.push("");
+    parts.push("## Where-Used List");
+    parts.push("The following objects reference this object:");
+    for (const ref of whereUsedList) {
+      parts.push(`- ${ref.name} (${ref.type})${ref.description ? ": " + ref.description : ""}`);
+    }
+  } else if (whereUsedList) {
+    parts.push("");
+    parts.push("## Where-Used List");
+    parts.push("No where-used references found for this object.");
   }
 
   parts.push("");

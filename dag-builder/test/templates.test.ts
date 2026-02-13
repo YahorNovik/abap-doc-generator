@@ -24,7 +24,7 @@ describe("resolveTemplate — class/interface", () => {
   it("includes Where-Used section for classes", () => {
     const tmpl = resolveTemplate("default", undefined, "CLAS");
     expect(tmpl.sections).toContain("Where-Used");
-    expect(tmpl.sections).toContain("get_where_used");
+    expect(tmpl.sections).toContain("where-used data provided");
   });
 
   it("includes Dependencies section for classes", () => {
