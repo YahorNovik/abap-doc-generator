@@ -205,7 +205,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
 
         const template = resolveTemplate(input.templateType, input.templateCustom, obj.type);
         const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
-        const docMessages = buildDocPrompt(dagNode, source, depDetails, template, internalWhereUsed);
+        const docMessages = buildDocPrompt(dagNode, source, depDetails, template, internalWhereUsed, input.userContext);
 
         const toolExecutor = async (tc: ToolCall): Promise<string> => {
           switch (tc.name) {
@@ -277,6 +277,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         objectCount: c.objects.length,
       })),
       aggregatedExternalDeps,
+      input.userContext,
     );
     const overviewConfig: LlmConfig = { ...input.docLlm, maxTokens: PACKAGE_OVERVIEW_MAX_TOKENS };
 

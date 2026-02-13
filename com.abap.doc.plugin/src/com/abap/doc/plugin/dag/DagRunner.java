@@ -57,12 +57,13 @@ public class DagRunner {
                               String docProvider, String docApiKey, String docModel, String docBaseUrl,
                               String mode, int maxTotalTokens,
                               String templateType, String templateCustom,
+                              String userContext,
                               Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildDocInputJson(systemUrl, client, username, password, objectName, objectType,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
             docProvider, docApiKey, docModel, docBaseUrl, mode, maxTotalTokens,
-            templateType, templateCustom);
+            templateType, templateCustom, userContext);
         return runScript(input, progressCallback);
     }
 
@@ -72,12 +73,13 @@ public class DagRunner {
                                      String docProvider, String docApiKey, String docModel, String docBaseUrl,
                                      String mode, int maxTotalTokens,
                                      String templateType, String templateCustom,
+                                     String userContext,
                                      Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildPackageDocInputJson(systemUrl, client, username, password, packageName,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
             docProvider, docApiKey, docModel, docBaseUrl, mode, maxTotalTokens,
-            templateType, templateCustom);
+            templateType, templateCustom, userContext);
         return runScript(input, progressCallback);
     }
 
@@ -135,7 +137,8 @@ public class DagRunner {
                                              String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                                              String docProvider, String docApiKey, String docModel, String docBaseUrl,
                                              String mode, int maxTotalTokens,
-                                             String templateType, String templateCustom) {
+                                             String templateType, String templateCustom,
+                                             String userContext) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-doc\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -172,6 +175,9 @@ public class DagRunner {
         if (templateCustom != null && !templateCustom.isEmpty()) {
             sb.append(",\"templateCustom\":\"").append(escapeJson(templateCustom)).append("\"");
         }
+        if (userContext != null && !userContext.isEmpty()) {
+            sb.append(",\"userContext\":\"").append(escapeJson(userContext)).append("\"");
+        }
         sb.append("}");
         return sb.toString();
     }
@@ -181,7 +187,8 @@ public class DagRunner {
                                                     String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                                                     String docProvider, String docApiKey, String docModel, String docBaseUrl,
                                                     String mode, int maxTotalTokens,
-                                                    String templateType, String templateCustom) {
+                                                    String templateType, String templateCustom,
+                                                    String userContext) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-package-doc\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -217,12 +224,61 @@ public class DagRunner {
         if (templateCustom != null && !templateCustom.isEmpty()) {
             sb.append(",\"templateCustom\":\"").append(escapeJson(templateCustom)).append("\"");
         }
+        if (userContext != null && !userContext.isEmpty()) {
+            sb.append(",\"userContext\":\"").append(escapeJson(userContext)).append("\"");
+        }
         sb.append("}");
         return sb.toString();
     }
 
-    private static String escapeJson(String value) {
+    public String chat(String systemUrl, String client, String username, String password,
+                       String objectName, String objectType,
+                       String documentation, String userContext,
+                       String conversationJson,
+                       String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                       Consumer<String> progressCallback) throws IOException, InterruptedException {
+
+        String input = buildChatInputJson(systemUrl, client, username, password,
+            objectName, objectType, documentation, userContext, conversationJson,
+            docProvider, docApiKey, docModel, docBaseUrl);
+        return runScript(input, progressCallback);
+    }
+
+    private static String buildChatInputJson(String systemUrl, String client, String username, String password,
+                                              String objectName, String objectType,
+                                              String documentation, String userContext,
+                                              String conversationJson,
+                                              String docProvider, String docApiKey, String docModel, String docBaseUrl) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"command\":\"chat\"");
+        sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
+        sb.append(",\"client\":\"").append(escapeJson(client)).append("\"");
+        sb.append(",\"username\":\"").append(escapeJson(username)).append("\"");
+        sb.append(",\"password\":\"").append(escapeJson(password)).append("\"");
+        sb.append(",\"objectName\":\"").append(escapeJson(objectName)).append("\"");
+        sb.append(",\"objectType\":\"").append(escapeJson(objectType)).append("\"");
+        sb.append(",\"documentation\":\"").append(escapeJson(documentation)).append("\"");
+        if (userContext != null && !userContext.isEmpty()) {
+            sb.append(",\"userContext\":\"").append(escapeJson(userContext)).append("\"");
+        }
+        sb.append(",\"conversation\":").append(conversationJson);
+        sb.append(",\"docLlm\":{");
+        sb.append("\"provider\":\"").append(escapeJson(docProvider)).append("\"");
+        sb.append(",\"apiKey\":\"").append(escapeJson(docApiKey)).append("\"");
+        sb.append(",\"model\":\"").append(escapeJson(docModel)).append("\"");
+        if (docBaseUrl != null && !docBaseUrl.isEmpty()) {
+            sb.append(",\"baseUrl\":\"").append(escapeJson(docBaseUrl)).append("\"");
+        }
+        sb.append("}}");
+        return sb.toString();
+    }
+
+    public static String escapeJson(String value) {
         if (value == null) return "";
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+        return value.replace("\\", "\\\\")
+                     .replace("\"", "\\\"")
+                     .replace("\n", "\\n")
+                     .replace("\r", "\\r")
+                     .replace("\t", "\\t");
     }
 }

@@ -121,7 +121,7 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
     const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
     log(`Using template: ${template.name} (maxWords=${template.maxWords}, maxOutputTokens=${template.maxOutputTokens})`);
 
-    const docMessages = buildDocPrompt(rootNode, rootSource, depDetails, template, whereUsedList);
+    const docMessages = buildDocPrompt(rootNode, rootSource, depDetails, template, whereUsedList, input.userContext);
 
     // Tool executor: gives the LLM access to ADT for on-demand source and where-used
     const toolExecutor = async (tc: ToolCall): Promise<string> => {

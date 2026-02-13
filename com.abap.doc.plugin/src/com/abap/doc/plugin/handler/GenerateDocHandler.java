@@ -13,6 +13,7 @@ import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
+import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorPart;
@@ -22,6 +23,7 @@ import org.eclipse.ui.browser.IWorkbenchBrowserSupport;
 import org.eclipse.ui.handlers.HandlerUtil;
 
 import com.abap.doc.plugin.Activator;
+import com.abap.doc.plugin.GenerationResult;
 import com.abap.doc.plugin.PluginConsole;
 import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
@@ -99,12 +101,23 @@ public class GenerateDocHandler extends AbstractHandler {
             objectType = "INTF";
         }
 
+        // Optional context dialog
+        String userContext = "";
+        MultiLineInputDialog ctxDialog = new MultiLineInputDialog(shell,
+            "Additional Context (Optional)",
+            "Provide any business context, domain notes, or special instructions for documentation generation.",
+            "");
+        if (ctxDialog.open() == Window.OK) {
+            userContext = ctxDialog.getValue();
+        }
+
         final String fObjectName = objectName;
         final String fObjectType = objectType;
         final String fMode = mode;
         final int fMaxTotalTokens = maxTotalTokens;
         final String fTemplateType = templateType;
         final String fTemplateCustom = templateCustom;
+        final String fUserContext = userContext;
 
         Job job = new Job("Generating documentation for " + objectName) {
             @Override
@@ -122,6 +135,7 @@ public class GenerateDocHandler extends AbstractHandler {
                         docProvider, docApiKey, docModel, docBaseUrl,
                         fMode, fMaxTotalTokens,
                         fTemplateType, fTemplateCustom,
+                        fUserContext,
                         line -> {
                             monitor.subTask(line);
                             PluginConsole.println(line);
@@ -139,6 +153,26 @@ public class GenerateDocHandler extends AbstractHandler {
                         tempFile.deleteOnExit();
                         Files.writeString(tempFile.toPath(), html, StandardCharsets.UTF_8);
                         PluginConsole.println("HTML written to " + tempFile.getAbsolutePath());
+
+                        // Store result for chat and save features
+                        GenerationResult gr = GenerationResult.getInstance();
+                        gr.clear();
+                        gr.setObjectName(fObjectName);
+                        gr.setObjectType(fObjectType);
+                        gr.setPackage(false);
+                        gr.setMarkdown(extractDocumentation(resultJson));
+                        gr.setHtml(html);
+                        gr.setHtmlFile(tempFile);
+                        gr.setSystemUrl(systemUrl);
+                        gr.setClient(client);
+                        gr.setUsername(username);
+                        gr.setPassword(password);
+                        gr.setDocProvider(docProvider);
+                        gr.setDocApiKey(docApiKey);
+                        gr.setDocModel(docModel);
+                        gr.setDocBaseUrl(docBaseUrl);
+                        gr.setMaxTotalTokens(fMaxTotalTokens);
+                        gr.setUserContext(fUserContext);
 
                         display.asyncExec(() -> {
                             try {

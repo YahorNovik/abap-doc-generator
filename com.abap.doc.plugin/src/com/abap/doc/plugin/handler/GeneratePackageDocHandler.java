@@ -25,6 +25,7 @@ import org.eclipse.ui.browser.IWorkbenchBrowserSupport;
 import org.eclipse.ui.handlers.HandlerUtil;
 
 import com.abap.doc.plugin.Activator;
+import com.abap.doc.plugin.GenerationResult;
 import com.abap.doc.plugin.PluginConsole;
 import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
@@ -93,10 +94,22 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         }
 
         String packageName = dialog.getValue().trim().toUpperCase();
+
+        // Optional context dialog
+        String userContext = "";
+        MultiLineInputDialog ctxDialog = new MultiLineInputDialog(shell,
+            "Additional Context (Optional)",
+            "Provide any business context, domain notes, or special instructions for documentation generation.",
+            "");
+        if (ctxDialog.open() == Window.OK) {
+            userContext = ctxDialog.getValue();
+        }
+
         final String fMode = mode;
         final int fMaxTotalTokens = maxTotalTokens;
         final String fTemplateType = templateType;
         final String fTemplateCustom = templateCustom;
+        final String fUserContext = userContext;
 
         Job job = new Job("Generating package documentation for " + packageName) {
             @Override
@@ -114,6 +127,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         docProvider, docApiKey, docModel, docBaseUrl,
                         fMode, fMaxTotalTokens,
                         fTemplateType, fTemplateCustom,
+                        fUserContext,
                         line -> {
                             monitor.subTask(line);
                             PluginConsole.println(line);
@@ -135,6 +149,26 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         File indexFile = new File(tempDir, "index.html");
                         PluginConsole.println("HTML wiki written to " + tempDir.getAbsolutePath()
                             + " (" + pages.size() + " pages)");
+
+                        // Store result for chat and save features
+                        GenerationResult gr = GenerationResult.getInstance();
+                        gr.clear();
+                        gr.setObjectName(packageName);
+                        gr.setObjectType("PACKAGE");
+                        gr.setPackage(true);
+                        gr.setMarkdown(extractDocumentation(resultJson));
+                        gr.setPages(pages);
+                        gr.setPagesDirectory(tempDir);
+                        gr.setSystemUrl(systemUrl);
+                        gr.setClient(client);
+                        gr.setUsername(username);
+                        gr.setPassword(password);
+                        gr.setDocProvider(docProvider);
+                        gr.setDocApiKey(docApiKey);
+                        gr.setDocModel(docModel);
+                        gr.setDocBaseUrl(docBaseUrl);
+                        gr.setMaxTotalTokens(fMaxTotalTokens);
+                        gr.setUserContext(fUserContext);
 
                         display.asyncExec(() -> {
                             try {

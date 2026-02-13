@@ -27,5 +27,8 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
 
         // Documentation template default
         store.setDefault(ConnectionPreferencePage.PREF_TEMPLATE, "default");
+
+        // Save path default (empty = always ask)
+        store.setDefault(ConnectionPreferencePage.PREF_SAVE_PATH, "");
     }
 }

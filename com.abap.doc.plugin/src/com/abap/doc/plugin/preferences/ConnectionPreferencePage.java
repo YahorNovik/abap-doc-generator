@@ -39,6 +39,9 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
     public static final String PREF_TEMPLATE = "docTemplate";
     public static final String PREF_TEMPLATE_CUSTOM = "docTemplateCustom";
 
+    // Save path
+    public static final String PREF_SAVE_PATH = "docSavePath";
+
     private static final String[][] PROVIDER_OPTIONS = {
         { "Gemini", "gemini" },
         { "OpenAI", "openai" },
@@ -112,6 +115,9 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         // Documentation template
         addField(new ComboFieldEditor(PREF_TEMPLATE, "Documentation Template:", TEMPLATE_OPTIONS, getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_TEMPLATE_CUSTOM, "Custom Template (when Custom selected):", getFieldEditorParent()));
+
+        // Save location
+        addField(new StringFieldEditor(PREF_SAVE_PATH, "Default Save Directory:", getFieldEditorParent()));
     }
 
     @Override

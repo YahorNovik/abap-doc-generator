@@ -23,6 +23,31 @@
             name="Generate Package Documentation"
             categoryId="com.abap.doc.commands.category">
         </command>
+        <command
+            id="com.abap.doc.command.saveDoc"
+            name="Save Documentation"
+            categoryId="com.abap.doc.commands.category">
+        </command>
+        <command
+            id="com.abap.doc.command.openChat"
+            name="Open ABAP Doc Chat"
+            categoryId="com.abap.doc.commands.category">
+        </command>
+    </extension>
+
+    <!-- Chat View -->
+    <extension point="org.eclipse.ui.views">
+        <category
+            id="com.abap.doc.views.category"
+            name="ABAP Documentation">
+        </category>
+        <view
+            id="com.abap.doc.chat.chatView"
+            name="ABAP Doc Chat"
+            class="com.abap.doc.plugin.chat.ChatView"
+            category="com.abap.doc.views.category"
+            allowMultiple="false">
+        </view>
     </extension>
 
     <!-- Menu contributions: context menu + main menu -->
@@ -69,6 +94,17 @@
                     label="Build Dependency Graph"
                     style="push">
                 </command>
+                <separator name="com.abap.doc.menu.separator1" visible="true"/>
+                <command
+                    commandId="com.abap.doc.command.saveDoc"
+                    label="Save Documentation"
+                    style="push">
+                </command>
+                <command
+                    commandId="com.abap.doc.command.openChat"
+                    label="Open Chat"
+                    style="push">
+                </command>
             </menu>
         </menuContribution>
     </extension>
@@ -86,6 +122,14 @@
         <handler
             class="com.abap.doc.plugin.handler.GeneratePackageDocHandler"
             commandId="com.abap.doc.command.generatePackageDoc">
+        </handler>
+        <handler
+            class="com.abap.doc.plugin.handler.SaveDocHandler"
+            commandId="com.abap.doc.command.saveDoc">
+        </handler>
+        <handler
+            class="com.abap.doc.plugin.chat.OpenChatHandler"
+            commandId="com.abap.doc.command.openChat">
         </handler>
     </extension>
 
@@ -108,6 +152,18 @@
             commandId="com.abap.doc.command.generatePackageDoc"
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
             sequence="M1+M2+P">
+        </key>
+        <!-- Ctrl+Shift+S: Save Documentation -->
+        <key
+            commandId="com.abap.doc.command.saveDoc"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+S">
+        </key>
+        <!-- Ctrl+Shift+C: Open Chat -->
+        <key
+            commandId="com.abap.doc.command.openChat"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            sequence="M1+M2+C">
         </key>
     </extension>
 

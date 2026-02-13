@@ -1,6 +1,7 @@
 import { buildDag } from "./dag-builder";
 import { generateDocumentation } from "./doc-generator";
 import { generatePackageDocumentation } from "./package-doc-generator";
+import { handleChat } from "./chat-handler";
 
 async function main(): Promise<void> {
   const raw = await readStdin();
@@ -36,6 +37,13 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       const result = await generateDocumentation(input);
+      process.stdout.write(JSON.stringify(result));
+    } else if (input.command === "chat") {
+      if (!input.docLlm) {
+        process.stderr.write("Error: docLlm config is required for chat\n");
+        process.exit(1);
+      }
+      const result = await handleChat(input);
       process.stdout.write(JSON.stringify(result));
     } else {
       // Default: build-dag (backward compatible)

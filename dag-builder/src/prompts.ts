@@ -58,6 +58,7 @@ export function buildDocPrompt(
   }>,
   template: DocTemplate,
   whereUsedList?: Array<{ name: string; type: string; description: string }>,
+  userContext?: string,
 ): LlmMessage[] {
   const objectTypeLabel = rootNode.type === "CLAS" ? "ABAP class"
     : rootNode.type === "INTF" ? "ABAP interface"
@@ -94,6 +95,12 @@ export function buildDocPrompt(
     "Do not fetch source for objects whose source is already included in the prompt.",
     "The where-used list for the root object is already included in the prompt — do not call get_where_used for it.",
     "Use get_where_used only if you need where-used data for other objects.",
+    ...(userContext && userContext.trim() ? [
+      "",
+      "## Additional Context from User",
+      "",
+      userContext.trim(),
+    ] : []),
   ].join("\n");
 
   const parts: string[] = [
@@ -193,6 +200,7 @@ export function buildPackageOverviewPrompt(
   packageName: string,
   clusterSummaries: Array<{ name: string; summary: string; objectCount: number }>,
   externalDependencies: Array<{ name: string; type: string; usedBy: string[] }>,
+  userContext?: string,
 ): LlmMessage[] {
   const system = [
     `You are an ABAP documentation expert. You are documenting ABAP package ${packageName}.`,
@@ -208,6 +216,12 @@ export function buildPackageOverviewPrompt(
     "## Formatting",
     "",
     "Output clean Markdown. Use `##` for section headings. Use `-` for bullet lists. Use `backticks` for ABAP names inline.",
+    ...(userContext && userContext.trim() ? [
+      "",
+      "## Additional Context from User",
+      "",
+      userContext.trim(),
+    ] : []),
   ].join("\n");
 
   const totalObjects = clusterSummaries.reduce((n, c) => n + c.objectCount, 0);

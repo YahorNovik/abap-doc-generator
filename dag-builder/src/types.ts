@@ -81,6 +81,7 @@ export interface DocInput {
   maxTotalTokens?: number;    // token budget for entire generation
   templateType?: "default" | "minimal" | "detailed" | "api-reference" | "custom";
   templateCustom?: string;    // user-provided template text (when templateType === "custom")
+  userContext?: string;        // additional context/notes from the user
 }
 
 export interface DocResult {
@@ -113,6 +114,7 @@ export interface PackageDocInput {
   maxTotalTokens?: number;
   templateType?: "default" | "minimal" | "detailed" | "custom";
   templateCustom?: string;
+  userContext?: string;        // additional context/notes from the user
 }
 
 export interface PackageObject {
