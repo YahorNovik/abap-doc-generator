@@ -94,18 +94,20 @@ describe("buildDocPrompt", () => {
     const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
     const sysMsg = messages.find((m) => m.role === "system")!;
     expect(sysMsg.content).toContain("Overview");
-    expect(sysMsg.content).toContain("Methods");
+    expect(sysMsg.content).toContain("Functional Logic");
     expect(sysMsg.content).toContain("Dependencies");
     expect(sysMsg.content).toContain("Where-Used");
     expect(sysMsg.content).toContain("Notes");
   });
 
-  it("should have system message with object type context", () => {
+  it("should have functional-focused system message with object type context", () => {
     const messages = buildDocPrompt(rootNode, rootSource, [], defaultTemplate);
     const sysMsg = messages.find((m) => m.role === "system")!;
     expect(sysMsg.content).toContain("ABAP documentation expert");
     expect(sysMsg.content).toContain("ABAP class");
     expect(sysMsg.content).toContain("ZCL_ROOT");
+    expect(sysMsg.content).toContain("functional");
+    expect(sysMsg.content).toContain("WHAT the object does and WHY");
   });
 
   it("should include word limit in system prompt", () => {
@@ -118,7 +120,7 @@ describe("buildDocPrompt", () => {
     const messages = buildDocPrompt(rootNode, rootSource, [], minimalTemplate);
     const sysMsg = messages.find((m) => m.role === "system")!;
     expect(sysMsg.content).toContain("Overview");
-    expect(sysMsg.content).toContain("Methods");
+    expect(sysMsg.content).toContain("Key Capabilities");
     expect(sysMsg.content).not.toContain("Dependencies");
     expect(sysMsg.content).toContain("under 1000 words");
   });

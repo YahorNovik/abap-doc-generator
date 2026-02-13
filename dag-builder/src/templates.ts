@@ -10,41 +10,31 @@ export interface DocTemplate {
 function classSections(detail: "default" | "minimal" | "detailed"): string {
   if (detail === "minimal") {
     return [
-      "Generate concise documentation with these sections:",
-      "1. **Overview** — one paragraph describing purpose and responsibility",
-      "2. **Methods** — for each method (public, protected, private): brief description, parameters, return type, exceptions (use tables)",
+      "Generate concise functional documentation with these sections:",
+      "1. **Overview** — what this class/interface does from a business perspective, what problem it solves",
+      "2. **Key Capabilities** — the main operations and behaviors it provides, described functionally (not a method-by-method API listing)",
     ].join("\n");
   }
 
   if (detail === "detailed") {
     return [
-      "Generate comprehensive documentation with these sections:",
-      "1. **Overview** — purpose, responsibility, and design rationale (1-2 paragraphs)",
-      "2. **Methods** — for each method (public, protected, private):",
-      "   - Description of what the method does and why",
-      "   - Parameters (table: name, type, direction, description)",
-      "   - Return type",
-      "   - Exceptions raised",
-      "   Group methods by visibility (PUBLIC, PROTECTED, PRIVATE).",
-      "3. **Dependencies** — detailed explanation of each dependency: what it is, how it is used, and why",
-      "4. **Where-Used** — where this object is used in the system, how callers use it, and in what context. Use the get_where_used tool to retrieve this information.",
-      "5. **Error Handling** — exception classes raised, error scenarios, how callers should handle them",
-      "6. **Notes** — design decisions, limitations, edge cases, migration notes",
+      "Generate comprehensive functional documentation with these sections:",
+      "1. **Overview** — what this class/interface does from a business perspective, what problem it solves, and its role in the application (1-2 paragraphs)",
+      "2. **Functional Logic** — describe the business logic and key operations this class provides. Group by functional area, not by method name. Explain the processing flow, business rules, and decision logic. Mention method names only when they represent a distinct functional step.",
+      "3. **Dependencies** — what other objects it relies on and what functional role each dependency plays in the overall logic",
+      "4. **Where-Used** — where this object is used in the system and for what functional purpose. Use the get_where_used tool to retrieve this information.",
+      "5. **Error Handling** — what can go wrong, what business validations are performed, and how errors are communicated to callers",
+      "6. **Notes** — design decisions, business constraints, known limitations",
     ].join("\n");
   }
 
   // default
   return [
-    "Generate documentation with these sections:",
-    "1. **Overview** — purpose and responsibility (1-2 paragraphs)",
-    "2. **Methods** — for each method (public, protected, private):",
-    "   - Description of what the method does",
-    "   - Parameters (table: name, type, direction, description)",
-    "   - Return type",
-    "   - Exceptions raised",
-    "   Group methods by visibility (PUBLIC, PROTECTED, PRIVATE).",
-    "3. **Dependencies** — how each dependency is used and why",
-    "4. **Where-Used** — where this object is used in the system, how and why. Use the get_where_used tool to retrieve this information.",
+    "Generate functional documentation with these sections:",
+    "1. **Overview** — what this class/interface does from a business perspective, what problem it solves (1-2 paragraphs)",
+    "2. **Functional Logic** — describe the business logic and key operations. Group by functional area, not by method name. Explain the processing flow and business rules. Mention method names only when they represent a distinct functional step.",
+    "3. **Dependencies** — what other objects it relies on and what functional role each dependency plays",
+    "4. **Where-Used** — where this object is used and for what purpose. Use the get_where_used tool to retrieve this information.",
     "5. **Notes** — design decisions, limitations, edge cases",
   ].join("\n");
 }
@@ -52,32 +42,31 @@ function classSections(detail: "default" | "minimal" | "detailed"): string {
 function reportSections(detail: "default" | "minimal" | "detailed"): string {
   if (detail === "minimal") {
     return [
-      "Generate concise documentation with these sections:",
-      "1. **Overview** — one paragraph describing purpose and responsibility",
-      "2. **Logic** — step-by-step explanation of the program logic, broken into logical parts/blocks",
+      "Generate concise functional documentation with these sections:",
+      "1. **Overview** — what this program does from a business perspective, what problem it solves",
+      "2. **Processing Logic** — step-by-step explanation of the business logic, broken into functional steps",
     ].join("\n");
   }
 
   if (detail === "detailed") {
     return [
-      "Generate comprehensive documentation with these sections:",
-      "1. **Overview** — purpose, responsibility, and design rationale (1-2 paragraphs)",
-      "2. **Selection Screen** — describe selection screen parameters and their purpose (if applicable)",
-      "3. **Logic** — step-by-step explanation of the program logic, broken into logical parts/blocks. For each part explain what it does, why, and how.",
-      "4. **Subroutines / Function Modules** — for each FORM or function module: description, parameters, what it does",
-      "5. **Dependencies** — detailed explanation of each dependency: what it is, how it is used, and why",
-      "6. **Where-Used** — where this program/FM is called, how and in what context. Use the get_where_used tool to retrieve this information.",
-      "7. **Notes** — design decisions, limitations, edge cases, migration notes",
+      "Generate comprehensive functional documentation with these sections:",
+      "1. **Overview** — what this program does from a business perspective, what problem it solves, and when/why it is run (1-2 paragraphs)",
+      "2. **Input** — selection screen parameters and their business meaning (if applicable)",
+      "3. **Processing Logic** — step-by-step explanation of the business logic, broken into functional steps. For each step explain what it does, what business rules apply, and what data is affected.",
+      "4. **Dependencies** — what other objects it relies on and what functional role each plays",
+      "5. **Where-Used** — where this program/FM is called and in what business context. Use the get_where_used tool to retrieve this information.",
+      "6. **Notes** — design decisions, business constraints, known limitations",
     ].join("\n");
   }
 
   // default
   return [
-    "Generate documentation with these sections:",
-    "1. **Overview** — purpose and responsibility (1-2 paragraphs)",
-    "2. **Logic** — step-by-step explanation of the program logic, broken into logical parts/blocks. For each part explain what it does and why.",
-    "3. **Dependencies** — how each dependency is used and why",
-    "4. **Where-Used** — where this program/FM is called, how and why. Use the get_where_used tool to retrieve this information.",
+    "Generate functional documentation with these sections:",
+    "1. **Overview** — what this program does from a business perspective, what problem it solves (1-2 paragraphs)",
+    "2. **Processing Logic** — step-by-step explanation of the business logic, broken into functional steps. For each step explain what it does and what business rules apply.",
+    "3. **Dependencies** — what other objects it relies on and what functional role each plays",
+    "4. **Where-Used** — where this program/FM is called and for what purpose. Use the get_where_used tool to retrieve this information.",
     "5. **Notes** — design decisions, limitations, edge cases",
   ].join("\n");
 }
@@ -85,33 +74,28 @@ function reportSections(detail: "default" | "minimal" | "detailed"): string {
 function cdsSections(detail: "default" | "minimal" | "detailed"): string {
   if (detail === "minimal") {
     return [
-      "Generate concise documentation with these sections:",
-      "1. **Overview** — one paragraph describing purpose and what data the view exposes",
-      "2. **Definition** — fields with types, associations, parameters (if any), key annotations, and underlying data sources (tables/views)",
+      "Generate concise functional documentation with these sections:",
+      "1. **Overview** — what business data this view exposes and for what purpose",
+      "2. **Data Model** — what data is provided, key fields, relationships to other entities, and underlying data sources",
     ].join("\n");
   }
 
   if (detail === "detailed") {
     return [
-      "Generate comprehensive documentation with these sections:",
-      "1. **Overview** — purpose, what data it exposes, business context, and design rationale (1-2 paragraphs)",
-      "2. **Definition** — describe in detail:",
-      "   - Fields: name, type, description, calculated/aggregated fields",
-      "   - Associations: relationships to other CDS views or tables, cardinality",
-      "   - Parameters: input parameters and their purpose (if parameterized)",
-      "   - Annotations: key annotations (OData, UI, Analytics, Search, ObjectModel) and their effect",
-      "   - Data sources: underlying tables and views it selects from, join conditions",
-      "3. **Where-Used** — what consumes this view (other CDS views, OData services, Fiori apps, ABAP programs). Use the get_where_used tool to retrieve this information.",
-      "4. **Notes** — design decisions, limitations, performance considerations, access control",
+      "Generate comprehensive functional documentation with these sections:",
+      "1. **Overview** — what business data this view exposes, for what purpose, and its role in the application (1-2 paragraphs)",
+      "2. **Data Model** — what business data is provided, key fields and their business meaning, relationships to other entities, calculated/derived fields and their logic, parameters and their purpose, key annotations and their effect, underlying data sources",
+      "3. **Where-Used** — what consumes this view and for what business purpose (other CDS views, OData services, Fiori apps, reports). Use the get_where_used tool to retrieve this information.",
+      "4. **Notes** — design decisions, performance considerations, access control, business constraints",
     ].join("\n");
   }
 
   // default
   return [
-    "Generate documentation with these sections:",
-    "1. **Overview** — purpose and what data the view exposes (1-2 paragraphs)",
-    "2. **Definition** — fields with types, associations, parameters (if any), key annotations, and underlying data sources (tables/views)",
-    "3. **Where-Used** — what consumes this view. Use the get_where_used tool to retrieve this information.",
+    "Generate functional documentation with these sections:",
+    "1. **Overview** — what business data this view exposes and for what purpose (1-2 paragraphs)",
+    "2. **Data Model** — what data is provided, key fields and their business meaning, relationships to other entities, and underlying data sources",
+    "3. **Where-Used** — what consumes this view and for what purpose. Use the get_where_used tool to retrieve this information.",
     "4. **Notes** — design decisions, limitations, edge cases",
   ].join("\n");
 }
@@ -143,7 +127,7 @@ function categorizeObjectType(objectType?: string): ObjectCategory {
 
 /**
  * Resolves a template based on template type, custom text, and ABAP object type.
- * Object type determines which section structure to use (class vs report/FM).
+ * Object type determines which section structure to use (class vs report/FM vs CDS).
  * Falls back to "default" when type is missing or unknown.
  */
 export function resolveTemplate(
