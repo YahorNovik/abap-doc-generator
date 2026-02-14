@@ -33,8 +33,10 @@ export async function fetchPackageObjects(
   return contents
     .filter((obj) => {
       const type = obj.objectType.split("/")[0];
+      const nameUpper = obj.objectName.toUpperCase();
       return RELEVANT_TYPES.has(type) && isCustomObject(obj.objectName)
-        && !subPackageNames.has(obj.objectName.toUpperCase());
+        && !subPackageNames.has(nameUpper)
+        && nameUpper !== packageName.toUpperCase();
     })
     .map((obj) => ({
       name: obj.objectName.toUpperCase(),
@@ -199,8 +201,10 @@ export async function discoverPackageTree(
   const objects = contents
     .filter((obj) => {
       const type = obj.objectType.split("/")[0];
+      const nameUpper = obj.objectName.toUpperCase();
       return RELEVANT_TYPES.has(type) && isCustomObject(obj.objectName)
-        && !subPackageNames.has(obj.objectName.toUpperCase());
+        && !subPackageNames.has(nameUpper)
+        && nameUpper !== packageName.toUpperCase(); // exclude package's own internal program
     })
     .map((obj) => ({
       name: obj.objectName.toUpperCase(),
