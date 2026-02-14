@@ -12,12 +12,14 @@ import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.widgets.DirectoryDialog;
+import org.eclipse.swt.widgets.FileDialog;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.handlers.HandlerUtil;
 
 import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.GenerationResult;
 import com.abap.doc.plugin.PluginConsole;
+import com.abap.doc.plugin.confluence.ConfluenceClient;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
 
 public class SaveDocHandler extends AbstractHandler {
@@ -38,6 +40,182 @@ public class SaveDocHandler extends AbstractHandler {
             return;
         }
 
+        // Build format options based on doc type
+        String[] options;
+        if (gr.isPackage()) {
+            options = new String[] { "HTML Wiki (multiple files)", "Single HTML File",
+                "Markdown File", "Publish to Confluence" };
+        } else {
+            options = new String[] { "Single HTML File", "Markdown File",
+                "Publish to Confluence" };
+        }
+
+        MessageDialog dialog = new MessageDialog(shell, "Save Documentation", null,
+            "Choose export format for: " + gr.getObjectName(),
+            MessageDialog.QUESTION, options, 0);
+        int choice = dialog.open();
+        if (choice < 0) return;
+
+        String selected = options[choice];
+
+        try {
+            switch (selected) {
+                case "HTML Wiki (multiple files)":
+                    saveHtmlWiki(shell, gr);
+                    break;
+                case "Single HTML File":
+                    saveSingleHtml(shell, gr);
+                    break;
+                case "Markdown File":
+                    saveMarkdown(shell, gr);
+                    break;
+                case "Publish to Confluence":
+                    publishToConfluence(shell, gr);
+                    break;
+            }
+        } catch (Exception e) {
+            MessageDialog.openError(shell, "ABAP Doc Generator",
+                "Failed to save documentation: " + e.getMessage());
+        }
+    }
+
+    private static void saveHtmlWiki(Shell shell, GenerationResult gr) throws Exception {
+        if (!gr.isPackage() || gr.getPages() == null) return;
+
+        String selectedPath = openDirectoryDialog(shell);
+        if (selectedPath == null) return;
+
+        File targetDir = new File(selectedPath);
+        if (!targetDir.exists()) targetDir.mkdirs();
+
+        for (Map.Entry<String, String> entry : gr.getPages().entrySet()) {
+            File pageFile = new File(targetDir, entry.getKey());
+            Files.writeString(pageFile.toPath(), entry.getValue(), StandardCharsets.UTF_8);
+        }
+
+        PluginConsole.println("Saved " + gr.getPages().size() + " pages to " + selectedPath);
+        MessageDialog.openInformation(shell, "ABAP Doc Generator",
+            "Package documentation saved to:\n" + selectedPath
+            + "\n(" + gr.getPages().size() + " files)");
+    }
+
+    private static void saveSingleHtml(Shell shell, GenerationResult gr) throws Exception {
+        String html;
+        if (gr.isPackage() && gr.getSinglePageHtml() != null) {
+            html = gr.getSinglePageHtml();
+        } else if (gr.getHtml() != null) {
+            html = gr.getHtml();
+        } else {
+            MessageDialog.openError(shell, "ABAP Doc Generator", "No HTML content available.");
+            return;
+        }
+
+        FileDialog fd = new FileDialog(shell, SWT.SAVE);
+        fd.setText("Save as HTML");
+        fd.setFilterExtensions(new String[] { "*.html" });
+        fd.setFileName(gr.getObjectName() + ".html");
+        applyDefaultPath(fd);
+        String path = fd.open();
+        if (path == null) return;
+
+        Files.writeString(new File(path).toPath(), html, StandardCharsets.UTF_8);
+        PluginConsole.println("Saved HTML to " + path);
+        MessageDialog.openInformation(shell, "ABAP Doc Generator",
+            "Documentation saved to:\n" + path);
+    }
+
+    private static void saveMarkdown(Shell shell, GenerationResult gr) throws Exception {
+        String md = gr.getMarkdown();
+        if (md == null || md.isBlank()) {
+            MessageDialog.openError(shell, "ABAP Doc Generator", "No Markdown content available.");
+            return;
+        }
+
+        FileDialog fd = new FileDialog(shell, SWT.SAVE);
+        fd.setText("Save as Markdown");
+        fd.setFilterExtensions(new String[] { "*.md" });
+        fd.setFileName(gr.getObjectName() + ".md");
+        applyDefaultPath(fd);
+        String path = fd.open();
+        if (path == null) return;
+
+        Files.writeString(new File(path).toPath(), md, StandardCharsets.UTF_8);
+        PluginConsole.println("Saved Markdown to " + path);
+        MessageDialog.openInformation(shell, "ABAP Doc Generator",
+            "Documentation saved to:\n" + path);
+    }
+
+    private static void publishToConfluence(Shell shell, GenerationResult gr) throws Exception {
+        IPreferenceStore store = Activator.getDefault().getPreferenceStore();
+        String confluenceUrl = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_URL);
+        String space = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_SPACE);
+        String parentId = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_PARENT_ID);
+        String username = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_USERNAME);
+        String token = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_TOKEN);
+
+        if (confluenceUrl.isBlank() || space.isBlank() || username.isBlank() || token.isBlank()) {
+            MessageDialog.openError(shell, "ABAP Doc Generator",
+                "Please configure Confluence settings in Preferences > ABAP Doc Generator.\n"
+                + "Required: URL, Space Key, Username, and API Token.");
+            return;
+        }
+
+        // Use single-page HTML for packages, regular HTML for single objects
+        String html;
+        if (gr.isPackage() && gr.getSinglePageHtml() != null) {
+            html = gr.getSinglePageHtml();
+        } else if (gr.getHtml() != null) {
+            html = gr.getHtml();
+        } else if (gr.getMarkdown() != null) {
+            html = gr.getMarkdown(); // Fallback to markdown
+        } else {
+            MessageDialog.openError(shell, "ABAP Doc Generator", "No content available to publish.");
+            return;
+        }
+
+        // Strip the full HTML wrapper — Confluence needs just the body content
+        String bodyContent = extractHtmlBody(html);
+
+        String title = gr.isPackage()
+            ? "Package " + gr.getObjectName() + " — Documentation"
+            : gr.getObjectName() + " — ABAP Documentation";
+
+        if (!MessageDialog.openConfirm(shell, "Publish to Confluence",
+                "Publish documentation to Confluence?\n\n"
+                + "Space: " + space + "\n"
+                + "Title: " + title + "\n"
+                + "URL: " + confluenceUrl)) {
+            return;
+        }
+
+        PluginConsole.println("Publishing to Confluence: " + confluenceUrl + " / " + space);
+        ConfluenceClient client = new ConfluenceClient(confluenceUrl, username, token);
+        String pageUrl = client.publishPage(space, title, bodyContent, parentId);
+
+        PluginConsole.println("Published to Confluence: " + pageUrl);
+        MessageDialog.openInformation(shell, "ABAP Doc Generator",
+            "Documentation published to Confluence:\n" + pageUrl);
+    }
+
+    /** Extracts content between <body> and </body> tags, or returns the full string. */
+    private static String extractHtmlBody(String html) {
+        int bodyStart = html.indexOf("<body>");
+        int bodyEnd = html.lastIndexOf("</body>");
+        if (bodyStart != -1 && bodyEnd != -1) {
+            return html.substring(bodyStart + 6, bodyEnd).trim();
+        }
+        // Try with attributes on body tag
+        bodyStart = html.indexOf("<body");
+        if (bodyStart != -1) {
+            int tagEnd = html.indexOf(">", bodyStart);
+            if (tagEnd != -1 && bodyEnd != -1) {
+                return html.substring(tagEnd + 1, bodyEnd).trim();
+            }
+        }
+        return html;
+    }
+
+    private static String openDirectoryDialog(Shell shell) {
         IPreferenceStore store = Activator.getDefault().getPreferenceStore();
         String defaultPath = store.getString(ConnectionPreferencePage.PREF_SAVE_PATH);
 
@@ -47,38 +225,14 @@ public class SaveDocHandler extends AbstractHandler {
         if (defaultPath != null && !defaultPath.isBlank()) {
             dirDialog.setFilterPath(defaultPath);
         }
+        return dirDialog.open();
+    }
 
-        String selectedPath = dirDialog.open();
-        if (selectedPath == null) {
-            return;
-        }
-
-        try {
-            File targetDir = new File(selectedPath);
-            if (!targetDir.exists()) {
-                targetDir.mkdirs();
-            }
-
-            if (gr.isPackage() && gr.getPages() != null) {
-                for (Map.Entry<String, String> entry : gr.getPages().entrySet()) {
-                    File pageFile = new File(targetDir, entry.getKey());
-                    Files.writeString(pageFile.toPath(), entry.getValue(), StandardCharsets.UTF_8);
-                }
-                PluginConsole.println("Saved " + gr.getPages().size() + " pages to " + selectedPath);
-                MessageDialog.openInformation(shell, "ABAP Doc Generator",
-                    "Package documentation saved to:\n" + selectedPath
-                    + "\n(" + gr.getPages().size() + " files)");
-            } else if (gr.getHtml() != null) {
-                String fileName = gr.getObjectName() + ".html";
-                File outFile = new File(targetDir, fileName);
-                Files.writeString(outFile.toPath(), gr.getHtml(), StandardCharsets.UTF_8);
-                PluginConsole.println("Saved documentation to " + outFile.getAbsolutePath());
-                MessageDialog.openInformation(shell, "ABAP Doc Generator",
-                    "Documentation saved to:\n" + outFile.getAbsolutePath());
-            }
-        } catch (Exception e) {
-            MessageDialog.openError(shell, "ABAP Doc Generator",
-                "Failed to save documentation: " + e.getMessage());
+    private static void applyDefaultPath(FileDialog fd) {
+        IPreferenceStore store = Activator.getDefault().getPreferenceStore();
+        String defaultPath = store.getString(ConnectionPreferencePage.PREF_SAVE_PATH);
+        if (defaultPath != null && !defaultPath.isBlank()) {
+            fd.setFilterPath(defaultPath);
         }
     }
 }

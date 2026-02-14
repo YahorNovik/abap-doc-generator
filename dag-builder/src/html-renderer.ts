@@ -397,6 +397,111 @@ export function renderSingleObjectHtml(
   return wrapHtmlPage(objectName, html);
 }
 
+// ─── Full single-page HTML for packages ───
+
+/**
+ * Renders all package documentation into a single self-contained HTML page.
+ * Uses anchor links instead of file links. Includes per-cluster Mermaid diagrams.
+ */
+export function renderFullPageHtml(
+  packageName: string,
+  overview: string,
+  clusters: Cluster[],
+  clusterSummaries: Record<string, string>,
+  objectDocs: Record<string, string>,
+): string {
+  // Collect all known object names for anchor-based cross-linking
+  const knownObjects = new Set<string>();
+  for (const c of clusters) {
+    for (const o of c.objects) knownObjects.add(o.name);
+  }
+
+  const parts: string[] = [];
+  parts.push(`<h1>Package ${escapeHtml(packageName)}</h1>`);
+  parts.push(markdownToHtml(overview));
+
+  for (const cluster of clusters) {
+    const clusterId = slugify(cluster.name);
+    parts.push(`<hr>`);
+    parts.push(`<h2 id="${clusterId}">${escapeHtml(cluster.name)}</h2>`);
+
+    const summary = clusterSummaries[cluster.name];
+    if (summary) {
+      parts.push(markdownToHtml(summary));
+    }
+
+    // Cluster dependency diagram
+    const clusterDiagram = buildMermaidDiagram(
+      cluster.objects, cluster.internalEdges,
+    );
+    if (clusterDiagram) {
+      parts.push(wrapDiagramHtml(clusterDiagram));
+    }
+
+    // Each object's documentation with shifted headings
+    for (const obj of cluster.objects) {
+      const md = objectDocs[obj.name];
+      if (!md) continue;
+      // Shift headings: # → ###, ## → ####
+      const shifted = md.replace(/^# /gm, "### ").replace(/^## /gm, "#### ");
+      let objHtml = markdownToHtml(shifted);
+      // Add anchor target
+      objHtml = `<div id="${escapeHtml(obj.name)}">\n${objHtml}\n</div>`;
+      // Cross-link: replace file links with anchor links
+      objHtml = linkifyAnchors(objHtml, knownObjects, obj.name);
+      parts.push(objHtml);
+    }
+  }
+
+  return wrapHtmlPage(`Package ${packageName}`, parts.join("\n"));
+}
+
+/** Like linkifyObjectNames but uses #anchor links instead of file links. */
+function linkifyAnchors(
+  html: string,
+  knownObjects: Set<string>,
+  currentObject?: string,
+): string {
+  const names = Array.from(knownObjects).filter((n) => n !== currentObject);
+  if (names.length === 0) return html;
+
+  names.sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(`\\b(${names.map(escapeRegex).join("|")})\\b`, "g");
+
+  const skipTags = new Set(["a", "code", "pre"]);
+  const parts: string[] = [];
+  let skipDepth = 0;
+  let pos = 0;
+
+  const tagRegex = /<\/?([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = tagRegex.exec(html)) !== null) {
+    if (match.index > pos) {
+      const text = html.slice(pos, match.index);
+      parts.push(skipDepth > 0 ? text : text.replace(pattern, '<a href="#$1">$1</a>'));
+    }
+    const fullTag = match[0];
+    const tagName = match[1].toLowerCase();
+    if (skipTags.has(tagName)) {
+      if (fullTag.startsWith("</")) {
+        skipDepth = Math.max(0, skipDepth - 1);
+      } else if (!fullTag.endsWith("/>")) {
+        skipDepth++;
+      }
+    }
+    parts.push(fullTag);
+    pos = match.index + fullTag.length;
+  }
+
+  if (pos < html.length) {
+    const text = html.slice(pos);
+    parts.push(skipDepth > 0 ? text : text.replace(pattern, '<a href="#$1">$1</a>'));
+  }
+
+  return parts.join("");
+}
+
 // ─── Helpers ───
 
 function escapeHtml(text: string): string {

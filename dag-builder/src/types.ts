@@ -146,6 +146,7 @@ export interface Cluster {
 export interface PackageDocResult {
   packageName: string;
   documentation: string;
+  singlePageHtml: string;
   pages: Record<string, string>;
   objectCount: number;
   clusterCount: number;

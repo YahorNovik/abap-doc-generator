@@ -156,6 +156,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         gr.setObjectType("PACKAGE");
                         gr.setPackage(true);
                         gr.setMarkdown(extractDocumentation(resultJson));
+                        gr.setSinglePageHtml(extractJsonStringField(resultJson, "singlePageHtml"));
                         gr.setPages(pages);
                         gr.setPagesDirectory(tempDir);
                         gr.setSystemUrl(systemUrl);
@@ -238,6 +239,38 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                     case 't': sb.append('\t'); break;
                     case '"': sb.append('"'); break;
                     case '\\': sb.append('\\'); break;
+                    default: sb.append('\\').append(c);
+                }
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                break;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String extractJsonStringField(String json, String field) {
+        String key = "\"" + field + "\":\"";
+        int start = json.indexOf(key);
+        if (start == -1) return "";
+        start += key.length();
+
+        StringBuilder sb = new StringBuilder();
+        boolean escaped = false;
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escaped) {
+                switch (c) {
+                    case 'n': sb.append('\n'); break;
+                    case 't': sb.append('\t'); break;
+                    case 'r': sb.append('\r'); break;
+                    case '"': sb.append('"'); break;
+                    case '\\': sb.append('\\'); break;
+                    case '/': sb.append('/'); break;
                     default: sb.append('\\').append(c);
                 }
                 escaped = false;

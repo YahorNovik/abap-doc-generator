@@ -23,6 +23,7 @@ public class GenerationResult {
     private File htmlFile;
 
     // Package doc
+    private String singlePageHtml;
     private Map<String, String> pages;
     private File pagesDirectory;
 
@@ -58,6 +59,7 @@ public class GenerationResult {
         markdown = null;
         html = null;
         htmlFile = null;
+        singlePageHtml = null;
         pages = null;
         pagesDirectory = null;
         systemUrl = null;
@@ -95,6 +97,9 @@ public class GenerationResult {
 
     public File getHtmlFile() { return htmlFile; }
     public void setHtmlFile(File htmlFile) { this.htmlFile = htmlFile; }
+
+    public String getSinglePageHtml() { return singlePageHtml; }
+    public void setSinglePageHtml(String singlePageHtml) { this.singlePageHtml = singlePageHtml; }
 
     public Map<String, String> getPages() { return pages; }
     public void setPages(Map<String, String> pages) { this.pages = pages; }
