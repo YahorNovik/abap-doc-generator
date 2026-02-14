@@ -45,6 +45,11 @@ nav.breadcrumb .sep { margin: 0 4px; }
 .toc li { padding: 4px 0; }
 .toc .obj-type { color: #656d76; font-size: 85%; margin-left: 4px; }
 .toc .obj-desc { color: #656d76; font-size: 85%; }
+.obj-card { background: #f6f8fa; border: 1px solid #d1d9e0; border-radius: 6px; padding: 12px 16px; margin: 8px 0; }
+.obj-card .obj-header { margin: 0 0 4px; font-size: 1em; font-weight: 600; }
+.obj-card .obj-header a { color: #0969da; }
+.obj-card .obj-header .obj-type { color: #656d76; font-size: 85%; font-weight: 400; margin-left: 4px; }
+.obj-card .obj-summary { margin: 4px 0 0; font-size: 0.9em; color: #1f2328; }
 .cluster-section { margin-top: 32px; }
 .back-link { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d1d9e0; }
 .diagram-container { margin: 16px 0 24px; }
@@ -162,13 +167,13 @@ function mermaidNodeDef(name: string, type: string): string {
 /**
  * Builds a Mermaid graph TD diagram from objects and edges.
  * Returns empty string if fewer than 2 connected nodes.
- * If clickableLinks is true, adds click directives for navigation.
+ * If linkedObjects set is provided, adds click directives for objects in that set.
  */
 function buildMermaidDiagram(
   objects: Array<{ name: string; type: string }>,
   edges: DagEdge[],
   highlightNode?: string,
-  clickableLinks?: boolean,
+  linkedObjects?: Set<string>,
 ): string {
   if (objects.length < 2 && edges.length === 0) return "";
 
@@ -208,10 +213,12 @@ function buildMermaidDiagram(
     lines.push(`  style ${mermaidId(highlightNode)} fill:#4a90d9,color:#fff,stroke:#2a6ab0`);
   }
 
-  // Clickable links for navigation
-  if (clickableLinks) {
+  // Clickable links for navigation (only for objects that have pages)
+  if (linkedObjects) {
     for (const obj of visibleObjects) {
-      lines.push(`  click ${mermaidId(obj.name)} "${obj.name}.html"`);
+      if (linkedObjects.has(obj.name)) {
+        lines.push(`  click ${mermaidId(obj.name)} "${obj.name}.html"`);
+      }
     }
   }
 
@@ -283,32 +290,32 @@ export function buildIndexPage(
       parts.push(markdownToHtml(summary));
     }
 
-    // Cluster dependency diagram
+    // Cluster dependency diagram — only link objects that have pages
+    const objectsWithPages = new Set(
+      cluster.objects.filter((o) => objectDocs?.[o.name] || summaries?.[o.name]).map((o) => o.name),
+    );
     const clusterDiagram = buildMermaidDiagram(
-      cluster.objects, cluster.internalEdges, undefined, true,
+      cluster.objects, cluster.internalEdges, undefined, objectsWithPages,
     );
     if (clusterDiagram) {
       parts.push(wrapDiagramHtml(clusterDiagram));
     }
 
-    // Object links — all objects with full docs or summaries get links
+    // Object cards — all objects with full docs or summaries get preview cards
     const linkedObjects = cluster.objects.filter((o) =>
       objectDocs?.[o.name] || summaries?.[o.name],
     );
-    if (linkedObjects.length > 0) {
-      parts.push(`<div class="toc"><ul>`);
-      for (const obj of linkedObjects) {
-        const summarySnippet = summaries?.[obj.name]
-          ? ` <span class="obj-desc">— ${escapeHtml(summaries[obj.name].substring(0, 120))}${summaries[obj.name].length > 120 ? "..." : ""}</span>`
-          : (obj.description ? ` <span class="obj-desc">— ${escapeHtml(obj.description)}</span>` : "");
-        parts.push(
-          `<li><a href="${linkPrefix}${obj.name}.html">${escapeHtml(obj.name)}</a>`
-          + `<span class="obj-type">(${escapeHtml(obj.type)})</span>`
-          + summarySnippet
-          + `</li>`,
-        );
+    for (const obj of linkedObjects) {
+      const summary = summaries?.[obj.name] ?? obj.description ?? "";
+      parts.push(`<div class="obj-card">`);
+      parts.push(
+        `<div class="obj-header"><a href="${linkPrefix}${obj.name}.html">${escapeHtml(obj.name)}</a>`
+        + `<span class="obj-type">(${escapeHtml(obj.type)})</span></div>`,
+      );
+      if (summary) {
+        parts.push(`<p class="obj-summary">${escapeHtml(summary)}</p>`);
       }
-      parts.push(`</ul></div>`);
+      parts.push(`</div>`);
     }
 
     parts.push(`</div>`);
@@ -329,6 +336,7 @@ export function buildObjectPage(
   objectEdges?: DagEdge[],
   clusterObjects?: Array<{ name: string; type: string }>,
   subPackageName?: string,
+  objectsWithPages?: Set<string>,
 ): string {
   const clusterId = slugify(clusterName);
   const indexHref = subPackageName ? "index.html" : "index.html";
@@ -355,7 +363,7 @@ export function buildObjectPage(
       connectedNames.add(e.to);
     }
     const visibleObjects = clusterObjects.filter((o) => connectedNames.has(o.name));
-    const diagram = buildMermaidDiagram(visibleObjects, objectEdges, objectName, true);
+    const diagram = buildMermaidDiagram(visibleObjects, objectEdges, objectName, objectsWithPages);
     if (diagram) {
       diagramHtml = "\n" + wrapDiagramHtml(diagram);
     }
@@ -391,6 +399,14 @@ export function assembleHtmlWiki(
     }
   }
 
+  // Collect objects that will have pages (for diagram click links)
+  const objectsWithPages = new Set<string>();
+  for (const cluster of clusters) {
+    for (const obj of cluster.objects) {
+      if (objectDocs[obj.name] || summaries?.[obj.name]) objectsWithPages.add(obj.name);
+    }
+  }
+
   // Build object pages (full docs or summary-only)
   for (const cluster of clusters) {
     for (const obj of cluster.objects) {
@@ -404,7 +420,7 @@ export function assembleHtmlWiki(
       );
       pages[`${obj.name}.html`] = buildObjectPage(
         obj.name, obj.type, html, packageName, cluster.name,
-        objectEdges, cluster.objects,
+        objectEdges, cluster.objects, undefined, objectsWithPages,
       );
     }
   }
@@ -600,6 +616,14 @@ export function assembleHierarchicalHtmlWiki(
     }
   }
 
+  // Collect objects that will have pages (for diagram click links)
+  const rootObjectsWithPages = new Set<string>();
+  for (const cluster of rootClusters) {
+    for (const obj of cluster.objects) {
+      if (rootObjectDocs[obj.name] || rootSummaries[obj.name]) rootObjectsWithPages.add(obj.name);
+    }
+  }
+
   // Build root-level object pages (full docs or summary-only)
   for (const cluster of rootClusters) {
     for (const obj of cluster.objects) {
@@ -613,7 +637,7 @@ export function assembleHierarchicalHtmlWiki(
       );
       pages[`${obj.name}.html`] = buildObjectPage(
         obj.name, obj.type, html, packageName, cluster.name,
-        objectEdges, cluster.objects,
+        objectEdges, cluster.objects, undefined, rootObjectsWithPages,
       );
     }
   }
@@ -622,6 +646,14 @@ export function assembleHierarchicalHtmlWiki(
   for (const sp of subPackages) {
     const spName = sp.node.name;
     const spDir = `${spName}/`;
+
+    // Collect sub-package objects with pages
+    const spObjectsWithPages = new Set<string>();
+    for (const cluster of sp.clusters) {
+      for (const obj of cluster.objects) {
+        if (sp.objectDocs[obj.name] || sp.summaries[obj.name]) spObjectsWithPages.add(obj.name);
+      }
+    }
 
     // Object pages within sub-package directory (full docs or summary-only)
     for (const cluster of sp.clusters) {
@@ -636,7 +668,7 @@ export function assembleHierarchicalHtmlWiki(
         );
         pages[`${spDir}${obj.name}.html`] = buildObjectPage(
           obj.name, obj.type, html, packageName, cluster.name,
-          objectEdges, cluster.objects, spName,
+          objectEdges, cluster.objects, spName, spObjectsWithPages,
         );
       }
     }
@@ -684,25 +716,22 @@ export function assembleHierarchicalHtmlWiki(
       if (summary) rootParts.push(markdownToHtml(summary));
 
       const clusterDiagram = buildMermaidDiagram(
-        cluster.objects, cluster.internalEdges, undefined, true,
+        cluster.objects, cluster.internalEdges, undefined, rootObjectsWithPages,
       );
       if (clusterDiagram) rootParts.push(wrapDiagramHtml(clusterDiagram));
 
       const linkedObjects = cluster.objects.filter((o) => rootObjectDocs[o.name] || rootSummaries[o.name]);
-      if (linkedObjects.length > 0) {
-        rootParts.push(`<div class="toc"><ul>`);
-        for (const obj of linkedObjects) {
-          const snippet = rootSummaries[obj.name]
-            ? ` <span class="obj-desc">— ${escapeHtml(rootSummaries[obj.name].substring(0, 120))}${rootSummaries[obj.name].length > 120 ? "..." : ""}</span>`
-            : "";
-          rootParts.push(
-            `<li><a href="${obj.name}.html">${escapeHtml(obj.name)}</a>`
-            + `<span class="obj-type">(${escapeHtml(obj.type)})</span>`
-            + snippet
-            + `</li>`,
-          );
+      for (const obj of linkedObjects) {
+        const summary = rootSummaries[obj.name] ?? "";
+        rootParts.push(`<div class="obj-card">`);
+        rootParts.push(
+          `<div class="obj-header"><a href="${obj.name}.html">${escapeHtml(obj.name)}</a>`
+          + `<span class="obj-type">(${escapeHtml(obj.type)})</span></div>`,
+        );
+        if (summary) {
+          rootParts.push(`<p class="obj-summary">${escapeHtml(summary)}</p>`);
         }
-        rootParts.push(`</ul></div>`);
+        rootParts.push(`</div>`);
       }
       rootParts.push(`</div>`);
     }

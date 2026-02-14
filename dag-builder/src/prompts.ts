@@ -207,15 +207,16 @@ export function buildClusterSummaryPrompt(
 ): LlmMessage[] {
   const system = [
     "You are an ABAP documentation assistant.",
-    "Summarize this functional cluster of related ABAP objects.",
-    "Focus on: what this cluster does as a unit, the data/control flow between objects, and the business capability it provides.",
-    "First line: suggest a short descriptive name for this cluster (3-5 words, no quotes).",
+    "Summarize this group of related ABAP objects.",
+    "Focus on: what this group does as a unit, the data/control flow between objects, and the business capability it provides.",
+    "First line: suggest a short descriptive name for this group (3-5 words, no quotes).",
     "Then a blank line, then the summary.",
     "Keep the summary under 300 words. Output plain text, no Markdown headers.",
+    "Do not use the word 'cluster' in your output.",
   ].join(" ");
 
   const parts: string[] = [
-    `Cluster contains ${clusterObjects.length} objects:`,
+    `Group contains ${clusterObjects.length} objects:`,
     "",
   ];
 
@@ -253,20 +254,15 @@ export function buildPackageOverviewPrompt(
 
   const system = [
     `You are an ABAP documentation expert. You are documenting ABAP package ${packageName}.`,
-    "Write a package-level overview covering:",
+    "Write a concise package overview in exactly 5 sentences:",
+    "1. What business domain this package serves.",
+    "2. What the package does from a functional perspective.",
+    "3. The main architectural pattern or layers used.",
+    "4. Key technologies or frameworks involved (e.g. CDS, RAP, BOPF).",
+    "5. How the main components relate to each other.",
     "",
-    "## Output Structure",
-    "",
-    "- **Overview** — What this package does from a business perspective. What business domain it serves. (1-2 paragraphs)",
-    hasSubPackages
-      ? "- **Architecture** — How the sub-packages and functional clusters relate to each other. Describe the high-level data flow, layers, and design patterns. (1-2 paragraphs)"
-      : "- **Architecture** — How the functional clusters relate to each other. Describe the high-level data flow, layers, and design patterns. (1-2 paragraphs)",
-    "",
-    "Keep the overview under 500 words. Be thorough but concise.",
-    "",
-    "## Formatting",
-    "",
-    "Output clean Markdown. Use `##` for section headings. Use `-` for bullet lists. Use `backticks` for ABAP names inline.",
+    "Output plain text — no headings, no bullets, no markdown formatting. Just 5 sentences in a single paragraph.",
+    "Do not use the word 'cluster' in your output.",
     ...(userContext && userContext.trim() ? [
       "",
       "## Additional Context from User",
@@ -283,7 +279,7 @@ export function buildPackageOverviewPrompt(
   ];
 
   if (hasSubPackages) {
-    parts.push(`Contains ${totalObjects} objects across ${subPackageSummaries!.length} sub-package(s) and ${clusterSummaries.length} root-level cluster(s).`);
+    parts.push(`Contains ${totalObjects} objects across ${subPackageSummaries!.length} sub-package(s) and ${clusterSummaries.length} component group(s).`);
     parts.push("");
     parts.push("## Sub-Packages");
     for (const sp of subPackageSummaries!) {
@@ -292,12 +288,12 @@ export function buildPackageOverviewPrompt(
       parts.push(sp.summary);
     }
   } else {
-    parts.push(`Contains ${totalObjects} objects in ${clusterSummaries.length} functional cluster(s).`);
+    parts.push(`Contains ${totalObjects} objects in ${clusterSummaries.length} component group(s).`);
   }
 
   if (clusterSummaries.length > 0) {
     parts.push("");
-    parts.push("## Functional Clusters");
+    parts.push("## Component Groups");
     for (const cluster of clusterSummaries) {
       parts.push("");
       parts.push(`### ${cluster.name} (${cluster.objectCount} objects)`);
@@ -336,11 +332,12 @@ export function buildSubPackageSummaryPrompt(
     `Summarize sub-package ${subPackageName} in under 200 words.`,
     "Focus on: what business capability this sub-package provides, how its objects work together.",
     "Output plain text, no Markdown headers.",
+    "Do not use the word 'cluster' in your output.",
   ].join(" ");
 
   const totalObjects = clusterSummaries.reduce((n, c) => n + c.objectCount, 0);
   const parts: string[] = [
-    `Sub-package ${subPackageName} contains ${totalObjects} objects in ${clusterSummaries.length} cluster(s):`,
+    `Sub-package ${subPackageName} contains ${totalObjects} objects in ${clusterSummaries.length} component group(s):`,
     "",
   ];
 

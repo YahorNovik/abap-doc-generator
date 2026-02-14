@@ -24,10 +24,17 @@ export async function fetchPackageObjects(
 ): Promise<PackageObject[]> {
   const contents = await client.getPackageContents(packageName);
 
+  // Exclude sub-package programs (DEVC objects that also appear as PROG)
+  const subPackageNames = new Set(
+    contents.filter((o) => o.objectType.split("/")[0] === "DEVC")
+      .map((o) => o.objectName.toUpperCase()),
+  );
+
   return contents
     .filter((obj) => {
       const type = obj.objectType.split("/")[0];
-      return RELEVANT_TYPES.has(type) && isCustomObject(obj.objectName);
+      return RELEVANT_TYPES.has(type) && isCustomObject(obj.objectName)
+        && !subPackageNames.has(obj.objectName.toUpperCase());
     })
     .map((obj) => ({
       name: obj.objectName.toUpperCase(),
@@ -187,11 +194,13 @@ export async function discoverPackageTree(
   const subPackageEntries = contents.filter(
     (obj) => obj.objectType.split("/")[0] === "DEVC" && isCustomObject(obj.objectName),
   );
+  const subPackageNames = new Set(subPackageEntries.map((sp) => sp.objectName.toUpperCase()));
 
   const objects = contents
     .filter((obj) => {
       const type = obj.objectType.split("/")[0];
-      return RELEVANT_TYPES.has(type) && isCustomObject(obj.objectName);
+      return RELEVANT_TYPES.has(type) && isCustomObject(obj.objectName)
+        && !subPackageNames.has(obj.objectName.toUpperCase());
     })
     .map((obj) => ({
       name: obj.objectName.toUpperCase(),
