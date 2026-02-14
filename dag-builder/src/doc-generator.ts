@@ -85,7 +85,7 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
       return {
         objectName: rootName,
         documentation: errorMd,
-        html: renderSingleObjectHtml(rootName, errorMd),
+        html: renderSingleObjectHtml(rootName, errorMd, dagResult.edges, dagResult.nodes),
         summaries,
         tokenUsage: { summaryTokens, docTokens, totalTokens: summaryTokens, agentIterations: 0, toolCalls: 0 },
         errors: [...errors, "Root object source not available."],
@@ -164,7 +164,7 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
       return {
         objectName: rootName,
         documentation: response.content,
-        html: renderSingleObjectHtml(rootName, response.content),
+        html: renderSingleObjectHtml(rootName, response.content, dagResult.edges, dagResult.nodes),
         summaries,
         tokenUsage: {
           summaryTokens,
@@ -181,7 +181,7 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
       return {
         objectName: rootName,
         documentation: errorMd,
-        html: renderSingleObjectHtml(rootName, errorMd),
+        html: renderSingleObjectHtml(rootName, errorMd, dagResult.edges, dagResult.nodes),
         summaries,
         tokenUsage: { summaryTokens, docTokens, totalTokens: summaryTokens + docTokens, agentIterations: 0, toolCalls: 0 },
         errors,

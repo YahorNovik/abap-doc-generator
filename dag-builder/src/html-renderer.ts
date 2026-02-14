@@ -1,5 +1,5 @@
 import { marked } from "marked";
-import { Cluster } from "./types";
+import { Cluster, DagEdge, DagNode } from "./types";
 
 // ─── GitHub-flavored Markdown CSS ───
 
@@ -47,6 +47,9 @@ nav.breadcrumb .sep { margin: 0 4px; }
 .toc .obj-desc { color: #656d76; font-size: 85%; }
 .cluster-section { margin-top: 32px; }
 .back-link { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d1d9e0; }
+.diagram-container { margin: 16px 0 24px; }
+.diagram-container summary { cursor: pointer; font-weight: 600; color: #0969da; }
+.diagram-container .mermaid { margin-top: 12px; }
 `;
 
 // ─── Markdown → HTML ───
@@ -68,6 +71,8 @@ export function wrapHtmlPage(title: string, bodyHtml: string, breadcrumbHtml?: s
 </head>
 <body>
 ${breadcrumbHtml ? breadcrumbHtml + "\n" : ""}${bodyHtml}
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'loose' });</script>
 </body>
 </html>`;
 }
@@ -127,6 +132,93 @@ export function linkifyObjectNames(
   return parts.join("");
 }
 
+// ─── Dependency diagram ───
+
+function mermaidId(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_]/g, "_");
+}
+
+function mermaidNodeDef(name: string, type: string): string {
+  const id = mermaidId(name);
+  const label = escapeHtml(name);
+  switch (type.toUpperCase()) {
+    case "INTF": return `  ${id}{{"${label}"}}`;
+    case "DDLS":
+    case "DDLX":
+    case "DCLS": return `  ${id}[("${label}")]`;
+    case "PROG":
+    case "FUGR": return `  ${id}(["${label}"])`;
+    default:     return `  ${id}["${label}"]`;
+  }
+}
+
+/**
+ * Builds a Mermaid graph TD diagram from objects and edges.
+ * Returns empty string if fewer than 2 connected nodes.
+ * If clickableLinks is true, adds click directives for navigation.
+ */
+function buildMermaidDiagram(
+  objects: Array<{ name: string; type: string }>,
+  edges: DagEdge[],
+  highlightNode?: string,
+  clickableLinks?: boolean,
+): string {
+  if (objects.length < 2 && edges.length === 0) return "";
+
+  // If >20 objects, only show nodes that have edges
+  const connectedNames = new Set<string>();
+  for (const e of edges) {
+    connectedNames.add(e.from);
+    connectedNames.add(e.to);
+  }
+  const visibleObjects = objects.length > 20
+    ? objects.filter((o) => connectedNames.has(o.name))
+    : objects;
+
+  if (visibleObjects.length < 2) return "";
+
+  const objectMap = new Map(objects.map((o) => [o.name, o]));
+  const lines: string[] = ["graph TD"];
+
+  // Node definitions
+  for (const obj of visibleObjects) {
+    lines.push(mermaidNodeDef(obj.name, obj.type));
+  }
+
+  // Edge definitions with member labels
+  for (const edge of edges) {
+    if (!objectMap.has(edge.from) || !objectMap.has(edge.to)) continue;
+    const fromId = mermaidId(edge.from);
+    const toId = mermaidId(edge.to);
+    const refs = edge.references.slice(0, 3).map((r) => r.memberName);
+    if (edge.references.length > 3) refs.push("...");
+    const label = refs.length > 0 ? `|"${refs.join(", ")}"|` : "";
+    lines.push(`  ${fromId} -->${label} ${toId}`);
+  }
+
+  // Highlight node
+  if (highlightNode && objectMap.has(highlightNode)) {
+    lines.push(`  style ${mermaidId(highlightNode)} fill:#4a90d9,color:#fff,stroke:#2a6ab0`);
+  }
+
+  // Clickable links for navigation
+  if (clickableLinks) {
+    for (const obj of visibleObjects) {
+      lines.push(`  click ${mermaidId(obj.name)} "${obj.name}.html"`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function wrapDiagramHtml(mermaidCode: string, open = true): string {
+  return `<div class="diagram-container">\n`
+    + `<details${open ? " open" : ""}>\n`
+    + `<summary>Dependency Graph</summary>\n`
+    + `<div class="mermaid">\n${mermaidCode}\n</div>\n`
+    + `</details>\n</div>`;
+}
+
 // ─── Page builders ───
 
 export function buildIndexPage(
@@ -154,6 +246,14 @@ export function buildIndexPage(
     const summary = clusterSummaries[cluster.name];
     if (summary) {
       parts.push(markdownToHtml(summary));
+    }
+
+    // Cluster dependency diagram
+    const clusterDiagram = buildMermaidDiagram(
+      cluster.objects, cluster.internalEdges, undefined, true,
+    );
+    if (clusterDiagram) {
+      parts.push(wrapDiagramHtml(clusterDiagram));
     }
 
     parts.push(`<div class="toc"><ul>`);
@@ -195,6 +295,8 @@ export function buildObjectPage(
   objectDocHtml: string,
   packageName: string,
   clusterName: string,
+  objectEdges?: DagEdge[],
+  clusterObjects?: Array<{ name: string; type: string }>,
 ): string {
   const clusterId = slugify(clusterName);
   const breadcrumb = `<nav class="breadcrumb">`
@@ -205,7 +307,23 @@ export function buildObjectPage(
     + `<strong>${escapeHtml(objectName)}</strong>`
     + `</nav>`;
 
+  let diagramHtml = "";
+  if (objectEdges && objectEdges.length > 0 && clusterObjects) {
+    // Show only nodes connected to this object
+    const connectedNames = new Set<string>([objectName]);
+    for (const e of objectEdges) {
+      connectedNames.add(e.from);
+      connectedNames.add(e.to);
+    }
+    const visibleObjects = clusterObjects.filter((o) => connectedNames.has(o.name));
+    const diagram = buildMermaidDiagram(visibleObjects, objectEdges, objectName, true);
+    if (diagram) {
+      diagramHtml = "\n" + wrapDiagramHtml(diagram);
+    }
+  }
+
   const body = objectDocHtml
+    + diagramHtml
     + `\n<div class="back-link"><a href="index.html">&larr; Back to ${escapeHtml(packageName)}</a></div>`;
 
   return wrapHtmlPage(`${objectName} — ${packageName}`, body, breadcrumb);
@@ -238,8 +356,13 @@ export function assembleHtmlWiki(
       if (!md) continue;
       let html = markdownToHtml(md);
       html = linkifyObjectNames(html, knownObjects, obj.name);
+      // Collect edges relevant to this object
+      const objectEdges = cluster.internalEdges.filter(
+        (e) => e.from === obj.name || e.to === obj.name,
+      );
       pages[`${obj.name}.html`] = buildObjectPage(
         obj.name, obj.type, html, packageName, cluster.name,
+        objectEdges, cluster.objects,
       );
     }
   }
@@ -255,8 +378,22 @@ export function assembleHtmlWiki(
 
 // ─── Single-object standalone HTML ───
 
-export function renderSingleObjectHtml(objectName: string, markdown: string): string {
-  const html = markdownToHtml(markdown);
+export function renderSingleObjectHtml(
+  objectName: string,
+  markdown: string,
+  dagEdges?: DagEdge[],
+  dagNodes?: DagNode[],
+): string {
+  let html = markdownToHtml(markdown);
+
+  if (dagEdges && dagNodes && dagEdges.length > 0) {
+    const objects = dagNodes.map((n) => ({ name: n.name, type: n.type }));
+    const diagram = buildMermaidDiagram(objects, dagEdges, objectName);
+    if (diagram) {
+      html += "\n" + wrapDiagramHtml(diagram);
+    }
+  }
+
   return wrapHtmlPage(objectName, html);
 }
 
