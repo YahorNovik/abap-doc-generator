@@ -291,26 +291,25 @@ export function buildIndexPage(
       parts.push(wrapDiagramHtml(clusterDiagram));
     }
 
-    // Object links — only objects with full docs get links
-    const linkedObjects = objectDocs
-      ? cluster.objects.filter((o) => objectDocs[o.name])
-      : cluster.objects;
+    // Object links — all objects with full docs or summaries get links
+    const linkedObjects = cluster.objects.filter((o) =>
+      objectDocs?.[o.name] || summaries?.[o.name],
+    );
     if (linkedObjects.length > 0) {
       parts.push(`<div class="toc"><ul>`);
       for (const obj of linkedObjects) {
+        const isSummaryOnly = !objectDocs?.[obj.name] && summaries?.[obj.name];
+        const summarySnippet = isSummaryOnly
+          ? ` <span class="obj-desc">— ${escapeHtml(summaries![obj.name].substring(0, 120))}${summaries![obj.name].length > 120 ? "..." : ""}</span>`
+          : (obj.description ? ` <span class="obj-desc">— ${escapeHtml(obj.description)}</span>` : "");
         parts.push(
           `<li><a href="${linkPrefix}${obj.name}.html">${escapeHtml(obj.name)}</a>`
           + `<span class="obj-type">(${escapeHtml(obj.type)})</span>`
-          + (obj.description ? ` <span class="obj-desc">— ${escapeHtml(obj.description)}</span>` : "")
+          + summarySnippet
           + `</li>`,
         );
       }
       parts.push(`</ul></div>`);
-    }
-
-    // Summary cards for triaged-out objects
-    if (objectDocs && summaries) {
-      parts.push(renderSummaryOnlySection(cluster.objects, objectDocs, summaries));
     }
 
     parts.push(`</div>`);
@@ -408,14 +407,14 @@ export function assembleHtmlWiki(
     }
   }
 
-  // Build object pages (only for objects with full docs)
+  // Build object pages (full docs or summary-only)
   for (const cluster of clusters) {
     for (const obj of cluster.objects) {
-      const md = objectDocs[obj.name];
+      const md = objectDocs[obj.name]
+        ?? (summaries?.[obj.name] ? `# ${obj.name}\n\n${summaries[obj.name]}` : undefined);
       if (!md) continue;
       let html = markdownToHtml(md);
       html = linkifyObjectNames(html, knownObjects, obj.name);
-      // Collect edges relevant to this object
       const objectEdges = cluster.internalEdges.filter(
         (e) => e.from === obj.name || e.to === obj.name,
       );
@@ -617,10 +616,11 @@ export function assembleHierarchicalHtmlWiki(
     }
   }
 
-  // Build root-level object pages
+  // Build root-level object pages (full docs or summary-only)
   for (const cluster of rootClusters) {
     for (const obj of cluster.objects) {
-      const md = rootObjectDocs[obj.name];
+      const md = rootObjectDocs[obj.name]
+        ?? (rootSummaries[obj.name] ? `# ${obj.name}\n\n${rootSummaries[obj.name]}` : undefined);
       if (!md) continue;
       let html = markdownToHtml(md);
       html = linkifyObjectNames(html, allObjects, obj.name);
@@ -639,10 +639,11 @@ export function assembleHierarchicalHtmlWiki(
     const spName = sp.node.name;
     const spDir = `${spName}/`;
 
-    // Object pages within sub-package directory
+    // Object pages within sub-package directory (full docs or summary-only)
     for (const cluster of sp.clusters) {
       for (const obj of cluster.objects) {
-        const md = sp.objectDocs[obj.name];
+        const md = sp.objectDocs[obj.name]
+          ?? (sp.summaries[obj.name] ? `# ${obj.name}\n\n${sp.summaries[obj.name]}` : undefined);
         if (!md) continue;
         let html = markdownToHtml(md);
         html = linkifyObjectNames(html, allObjects, obj.name);
@@ -703,19 +704,23 @@ export function assembleHierarchicalHtmlWiki(
       );
       if (clusterDiagram) rootParts.push(wrapDiagramHtml(clusterDiagram));
 
-      const linkedObjects = cluster.objects.filter((o) => rootObjectDocs[o.name]);
+      const linkedObjects = cluster.objects.filter((o) => rootObjectDocs[o.name] || rootSummaries[o.name]);
       if (linkedObjects.length > 0) {
         rootParts.push(`<div class="toc"><ul>`);
         for (const obj of linkedObjects) {
+          const isSummaryOnly = !rootObjectDocs[obj.name] && rootSummaries[obj.name];
+          const snippet = isSummaryOnly
+            ? ` <span class="obj-desc">— ${escapeHtml(rootSummaries[obj.name].substring(0, 120))}${rootSummaries[obj.name].length > 120 ? "..." : ""}</span>`
+            : "";
           rootParts.push(
             `<li><a href="${obj.name}.html">${escapeHtml(obj.name)}</a>`
             + `<span class="obj-type">(${escapeHtml(obj.type)})</span>`
+            + snippet
             + `</li>`,
           );
         }
         rootParts.push(`</ul></div>`);
       }
-      rootParts.push(renderSummaryOnlySection(cluster.objects, rootObjectDocs, rootSummaries));
       rootParts.push(`</div>`);
     }
   }
