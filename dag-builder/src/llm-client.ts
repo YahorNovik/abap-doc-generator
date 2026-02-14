@@ -374,6 +374,12 @@ async function getOpenAIBatchResults(
 }
 
 // ─── Gemini Batch ───
+//
+// Uses the Gemini Batch API (v1beta):
+//   POST /v1beta/models/{model}:batchGenerateContent  — create batch job
+//   GET  /v1beta/{batchName}                          — poll status
+// Results come back as inlinedResponses when the job succeeds.
+//
 
 async function submitGeminiBatch(
   config: LlmConfig,
@@ -382,11 +388,12 @@ async function submitGeminiBatch(
   const maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS;
   const temperature = config.temperature ?? DEFAULT_TEMPERATURE;
 
-  const geminiRequests = requests.map((req) => {
+  // Build inline requests in the format the API expects
+  const inlineRequests = requests.map((req) => {
     const systemMessages = req.messages.filter((m) => m.role === "system");
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
 
-    const reqBody: Record<string, any> = {
+    const generateContentReq: Record<string, any> = {
       contents: nonSystemMessages.map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }],
@@ -395,20 +402,34 @@ async function submitGeminiBatch(
     };
 
     if (systemMessages.length > 0) {
-      reqBody.systemInstruction = {
+      generateContentReq.systemInstruction = {
         parts: [{ text: systemMessages.map((m) => m.content).join("\n\n") }],
       };
     }
 
-    return reqBody;
+    return {
+      request: generateContentReq,
+      metadata: { key: req.id },
+    };
   });
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:batchGenerateContent?key=${config.apiKey}`;
 
+  const body = {
+    batch: {
+      display_name: `abap-doc-batch-${Date.now()}`,
+      input_config: {
+        requests: {
+          requests: inlineRequests,
+        },
+      },
+    },
+  };
+
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ requests: geminiRequests }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -418,21 +439,19 @@ async function submitGeminiBatch(
 
   const json: any = await res.json();
 
-  // If response contains results directly (small batch, synchronous return)
-  if (json.responses) {
-    // Store results in a cache keyed by a synthetic ID
-    const syntheticId = `gemini-sync-${Date.now()}`;
-    geminiBatchCache.set(syntheticId, { requests, responses: json.responses });
-    return syntheticId;
+  // The API returns a batch job object with a name like "batches/123456789"
+  const batchName = json.name;
+  if (!batchName) {
+    throw new Error(`Gemini batch response missing 'name': ${JSON.stringify(json)}`);
   }
 
-  // Async operation — store request IDs for later mapping
-  const operationName = json.name;
-  geminiBatchCache.set(operationName, { requests, responses: null });
-  return operationName;
+  // Store request metadata for mapping results back to request IDs
+  geminiBatchCache.set(batchName, { requests, responses: null });
+  log(`Gemini batch created: ${batchName}`);
+  return batchName;
 }
 
-// Cache for Gemini batch results (maps operation name → request order + responses)
+// Cache for Gemini batch results (maps batch name → request order + responses)
 const geminiBatchCache = new Map<string, {
   requests: BatchRequest[];
   responses: any[] | null;
@@ -441,7 +460,7 @@ const geminiBatchCache = new Map<string, {
 async function pollGeminiBatch(config: LlmConfig, batchId: string): Promise<BatchStatus> {
   const cached = geminiBatchCache.get(batchId);
 
-  // Synchronous result already available
+  // Results already cached from a previous poll
   if (cached?.responses) {
     return {
       id: batchId,
@@ -451,7 +470,7 @@ async function pollGeminiBatch(config: LlmConfig, batchId: string): Promise<Batc
     };
   }
 
-  // Poll async operation
+  // Poll the batch job status
   const url = `https://generativelanguage.googleapis.com/v1beta/${batchId}?key=${config.apiKey}`;
   const res = await fetch(url);
 
@@ -462,19 +481,7 @@ async function pollGeminiBatch(config: LlmConfig, batchId: string): Promise<Batc
 
   const json: any = await res.json();
 
-  if (json.done && json.response?.responses) {
-    // Cache the results
-    if (cached) {
-      cached.responses = json.response.responses;
-    }
-    return {
-      id: batchId,
-      state: "completed",
-      completedCount: json.response.responses.length,
-      totalCount: cached?.requests.length ?? json.response.responses.length,
-    };
-  }
-
+  // Map Gemini job states to our internal states
   const stateMap: Record<string, BatchStatus["state"]> = {
     JOB_STATE_PENDING: "pending",
     JOB_STATE_RUNNING: "running",
@@ -484,9 +491,24 @@ async function pollGeminiBatch(config: LlmConfig, batchId: string): Promise<Batc
     JOB_STATE_EXPIRED: "failed",
   };
 
+  const state = stateMap[json.state] ?? "running";
+
+  // When succeeded, cache the inlined responses
+  if (state === "completed" && json.response?.inlinedResponses) {
+    if (cached) {
+      cached.responses = json.response.inlinedResponses;
+    }
+    return {
+      id: batchId,
+      state: "completed",
+      completedCount: json.response.inlinedResponses.length,
+      totalCount: cached?.requests.length ?? json.response.inlinedResponses.length,
+    };
+  }
+
   return {
     id: batchId,
-    state: stateMap[json.metadata?.state] ?? "running",
+    state,
     completedCount: 0,
     totalCount: cached?.requests.length ?? 0,
   };
@@ -504,13 +526,15 @@ async function getGeminiBatchResults(
   const results = new Map<string, LlmResponse>();
 
   for (let i = 0; i < cached.responses.length; i++) {
-    const response = cached.responses[i];
-    const requestId = cached.requests[i]?.id ?? `unknown-${i}`;
+    const entry = cached.responses[i];
+    // Each entry has { response: {candidates, usageMetadata}, metadata: {key} }
+    const responseObj = entry.response ?? entry;
+    const key = entry.metadata?.key ?? cached.requests[i]?.id ?? `unknown-${i}`;
 
-    const content = response.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const usage = response.usageMetadata ?? {};
+    const content = responseObj.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const usage = responseObj.usageMetadata ?? {};
 
-    results.set(requestId, {
+    results.set(key, {
       content,
       usage: {
         promptTokens: usage.promptTokenCount ?? 0,
