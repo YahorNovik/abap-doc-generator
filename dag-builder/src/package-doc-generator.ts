@@ -294,9 +294,9 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       const result = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet);
       const aggregatedExternalDeps = aggregateExternalDeps(result.graph);
 
-      const documentation = assembleDocument(input.packageName, "", result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
-      const pages = assembleHtmlWiki(input.packageName, "", result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
-      const singlePageHtml = renderFullPageHtml(input.packageName, "", result.clusters, result.clusterSummaries, result.objectDocs, result.summaries);
+      const documentation = assembleDocument(input.packageName, result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
+      const pages = assembleHtmlWiki(input.packageName, result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
+      const singlePageHtml = renderFullPageHtml(input.packageName, result.clusters, result.clusterSummaries, result.objectDocs, result.summaries);
 
       const { summaryTokens, objectDocTokens, clusterSummaryTokens } = result.tokenUsage;
       const totalTokens = summaryTokens + objectDocTokens + clusterSummaryTokens + overviewTokens;
@@ -363,15 +363,15 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       const rootSummaries = rootResult?.summaries ?? {};
 
       const documentation = assembleHierarchicalDocument(
-        input.packageName, "", rootClusters, rootClusterSummaries,
+        input.packageName, rootClusters, rootClusterSummaries,
         rootObjectDocs, rootSummaries, rootExternalDeps, spRenderData,
       );
       const pages = assembleHierarchicalHtmlWiki(
-        input.packageName, "", rootClusters, rootClusterSummaries,
+        input.packageName, rootClusters, rootClusterSummaries,
         rootObjectDocs, rootSummaries, rootExternalDeps, spRenderData,
       );
       const singlePageHtml = renderHierarchicalFullPageHtml(
-        input.packageName, "", rootClusters, rootClusterSummaries,
+        input.packageName, rootClusters, rootClusterSummaries,
         rootObjectDocs, rootSummaries, spRenderData,
       );
 
@@ -429,7 +429,6 @@ function emptyResult(packageName: string, errors: string[]): PackageDocResult {
  */
 export function assembleDocument(
   packageName: string,
-  overview: string,
   clusters: Cluster[],
   clusterSummaries: Record<string, string>,
   objectDocs: Record<string, string>,
@@ -439,8 +438,6 @@ export function assembleDocument(
   const parts: string[] = [];
 
   parts.push(`# Package ${packageName}`);
-  parts.push("");
-  parts.push(overview);
 
   for (const cluster of clusters) {
     parts.push("");
@@ -487,7 +484,6 @@ export function assembleDocument(
  */
 function assembleHierarchicalDocument(
   packageName: string,
-  overview: string,
   rootClusters: Cluster[],
   rootClusterSummaries: Record<string, string>,
   rootObjectDocs: Record<string, string>,
@@ -498,8 +494,6 @@ function assembleHierarchicalDocument(
   const parts: string[] = [];
 
   parts.push(`# Package ${packageName}`);
-  parts.push("");
-  parts.push(overview);
 
   // Sub-package sections
   for (const sp of subPackages) {
@@ -507,10 +501,6 @@ function assembleHierarchicalDocument(
     parts.push("---");
     parts.push("");
     parts.push(`## ${sp.node.name}`);
-    parts.push("");
-    if (sp.subPackageSummary) {
-      parts.push(sp.subPackageSummary);
-    }
 
     for (const cluster of sp.clusters) {
       parts.push("");

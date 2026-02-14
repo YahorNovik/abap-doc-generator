@@ -261,7 +261,6 @@ function renderSummaryOnlySection(
 
 export function buildIndexPage(
   packageName: string,
-  overviewHtml: string,
   clusters: Cluster[],
   clusterSummaries: Record<string, string>,
   externalDeps: Array<{ name: string; type: string; usedBy: string[] }>,
@@ -277,7 +276,6 @@ export function buildIndexPage(
 
   const parts: string[] = [];
   parts.push(`<h1>Package ${escapeHtml(packageName)}</h1>`);
-  parts.push(overviewHtml);
 
   // Table of Contents by cluster
   for (const cluster of clusters) {
@@ -382,7 +380,6 @@ export function buildObjectPage(
 
 export function assembleHtmlWiki(
   packageName: string,
-  overview: string,
   clusters: Cluster[],
   clusterSummaries: Record<string, string>,
   objectDocs: Record<string, string>,
@@ -426,9 +423,8 @@ export function assembleHtmlWiki(
   }
 
   // Build index page
-  const overviewHtml = markdownToHtml(overview);
   pages["index.html"] = buildIndexPage(
-    packageName, overviewHtml, clusters, clusterSummaries, externalDeps,
+    packageName, clusters, clusterSummaries, externalDeps,
     objectDocs, summaries,
   );
 
@@ -464,7 +460,6 @@ export function renderSingleObjectHtml(
  */
 export function renderFullPageHtml(
   packageName: string,
-  overview: string,
   clusters: Cluster[],
   clusterSummaries: Record<string, string>,
   objectDocs: Record<string, string>,
@@ -478,7 +473,6 @@ export function renderFullPageHtml(
 
   const parts: string[] = [];
   parts.push(`<h1>Package ${escapeHtml(packageName)}</h1>`);
-  parts.push(markdownToHtml(overview));
 
   for (const cluster of clusters) {
     const clusterId = slugify(cluster.name);
@@ -595,7 +589,6 @@ export interface SubPackageRenderData {
  */
 export function assembleHierarchicalHtmlWiki(
   packageName: string,
-  overview: string,
   rootClusters: Cluster[],
   rootClusterSummaries: Record<string, string>,
   rootObjectDocs: Record<string, string>,
@@ -674,18 +667,15 @@ export function assembleHierarchicalHtmlWiki(
     }
 
     // Sub-package index page
-    const spOverviewHtml = markdownToHtml(sp.subPackageSummary);
     pages[`${spDir}index.html`] = buildIndexPage(
-      spName, spOverviewHtml, sp.clusters, sp.clusterSummaries,
+      spName, sp.clusters, sp.clusterSummaries,
       sp.externalDeps, sp.objectDocs, sp.summaries,
     );
   }
 
   // Root index page
-  const rootOverviewHtml = markdownToHtml(overview);
   const rootParts: string[] = [];
   rootParts.push(`<h1>Package ${escapeHtml(packageName)}</h1>`);
-  rootParts.push(rootOverviewHtml);
 
   // Sub-package navigation
   if (subPackages.length > 0) {
@@ -749,7 +739,6 @@ export function assembleHierarchicalHtmlWiki(
  */
 export function renderHierarchicalFullPageHtml(
   packageName: string,
-  overview: string,
   rootClusters: Cluster[],
   rootClusterSummaries: Record<string, string>,
   rootObjectDocs: Record<string, string>,
@@ -768,7 +757,6 @@ export function renderHierarchicalFullPageHtml(
 
   const parts: string[] = [];
   parts.push(`<h1>Package ${escapeHtml(packageName)}</h1>`);
-  parts.push(markdownToHtml(overview));
 
   // Sub-package sections
   for (const sp of subPackages) {
@@ -776,9 +764,6 @@ export function renderHierarchicalFullPageHtml(
     parts.push(`<hr>`);
     parts.push(`<div class="sub-package-section">`);
     parts.push(`<h2 id="${spId}">${escapeHtml(sp.node.name)}</h2>`);
-    if (sp.subPackageSummary) {
-      parts.push(markdownToHtml(sp.subPackageSummary));
-    }
 
     for (const cluster of sp.clusters) {
       const clusterId = slugify(sp.node.name + "-" + cluster.name);
