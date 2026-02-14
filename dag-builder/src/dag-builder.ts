@@ -8,8 +8,12 @@ const MAX_NODES = 50;
 /** Object types that are meaningful for documentation (contain code or data structures). */
 const RELEVANT_TYPES = new Set([
   "CLAS", "INTF", "PROG", "FUGR",     // code objects
-  "TABL", "DDLS",                       // data model
+  "TABL", "DDLS", "VIEW",             // data model
+  "DTEL", "DOMA", "TTYP", "TYPE",     // dictionary / type definitions
   "DCLS", "DDLX", "BDEF", "SRVD",     // RAP / CDS extensions
+  "ENHO", "ENHS",                       // enhancements
+  "XSLT",                               // transformations
+  "MSAG", "TRAN",                       // message classes, transactions
 ]);
 
 function log(msg: string): void {

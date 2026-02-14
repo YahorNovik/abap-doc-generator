@@ -6,7 +6,12 @@ import { PackageObject, PackageGraph, Cluster, DagEdge, DagNode, SubPackageNode 
 
 const RELEVANT_TYPES = new Set([
   "CLAS", "INTF", "PROG", "FUGR",
-  "TABL", "DDLS", "DCLS", "DDLX", "BDEF", "SRVD",
+  "TABL", "DDLS", "VIEW",
+  "DTEL", "DOMA", "TTYP", "TYPE",
+  "DCLS", "DDLX", "BDEF", "SRVD",
+  "ENHO", "ENHS",
+  "XSLT",
+  "MSAG", "TRAN",
 ]);
 
 /**
