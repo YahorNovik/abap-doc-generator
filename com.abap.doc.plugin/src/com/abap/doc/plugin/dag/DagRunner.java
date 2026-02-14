@@ -55,14 +55,14 @@ public class DagRunner {
                               String objectName, String objectType,
                               String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                               String docProvider, String docApiKey, String docModel, String docBaseUrl,
-                              String mode, int maxTotalTokens,
+                              int maxTotalTokens,
                               String templateType, String templateCustom,
                               String userContext,
                               Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildDocInputJson(systemUrl, client, username, password, objectName, objectType,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
-            docProvider, docApiKey, docModel, docBaseUrl, mode, maxTotalTokens,
+            docProvider, docApiKey, docModel, docBaseUrl, maxTotalTokens,
             templateType, templateCustom, userContext);
         return runScript(input, progressCallback);
     }
@@ -71,7 +71,7 @@ public class DagRunner {
                                      String packageName,
                                      String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                                      String docProvider, String docApiKey, String docModel, String docBaseUrl,
-                                     String mode, int maxTotalTokens,
+                                     int maxTotalTokens,
                                      String templateType, String templateCustom,
                                      String userContext,
                                      int maxSubPackageDepth,
@@ -79,7 +79,7 @@ public class DagRunner {
 
         String input = buildPackageDocInputJson(systemUrl, client, username, password, packageName,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
-            docProvider, docApiKey, docModel, docBaseUrl, mode, maxTotalTokens,
+            docProvider, docApiKey, docModel, docBaseUrl, maxTotalTokens,
             templateType, templateCustom, userContext, maxSubPackageDepth);
         return runScript(input, progressCallback);
     }
@@ -137,7 +137,7 @@ public class DagRunner {
                                              String objectName, String objectType,
                                              String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                                              String docProvider, String docApiKey, String docModel, String docBaseUrl,
-                                             String mode, int maxTotalTokens,
+                                             int maxTotalTokens,
                                              String templateType, String templateCustom,
                                              String userContext) {
         StringBuilder sb = new StringBuilder();
@@ -164,9 +164,6 @@ public class DagRunner {
             sb.append(",\"baseUrl\":\"").append(escapeJson(docBaseUrl)).append("\"");
         }
         sb.append("}");
-        if (mode != null && !mode.isEmpty()) {
-            sb.append(",\"mode\":\"").append(escapeJson(mode)).append("\"");
-        }
         if (maxTotalTokens > 0) {
             sb.append(",\"maxTotalTokens\":").append(maxTotalTokens);
         }
@@ -187,7 +184,7 @@ public class DagRunner {
                                                     String packageName,
                                                     String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                                                     String docProvider, String docApiKey, String docModel, String docBaseUrl,
-                                                    String mode, int maxTotalTokens,
+                                                    int maxTotalTokens,
                                                     String templateType, String templateCustom,
                                                     String userContext,
                                                     int maxSubPackageDepth) {
@@ -214,9 +211,6 @@ public class DagRunner {
             sb.append(",\"baseUrl\":\"").append(escapeJson(docBaseUrl)).append("\"");
         }
         sb.append("}");
-        if (mode != null && !mode.isEmpty()) {
-            sb.append(",\"mode\":\"").append(escapeJson(mode)).append("\"");
-        }
         if (maxTotalTokens > 0) {
             sb.append(",\"maxTotalTokens\":").append(maxTotalTokens);
         }

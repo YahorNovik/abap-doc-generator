@@ -77,7 +77,7 @@ export interface DocInput {
   objectType: string;
   summaryLlm: LlmConfig;
   docLlm: LlmConfig;
-  mode?: "realtime" | "batch";
+
   maxTotalTokens?: number;    // token budget for entire generation
   templateType?: "default" | "minimal" | "detailed" | "api-reference" | "custom";
   templateCustom?: string;    // user-provided template text (when templateType === "custom")
@@ -110,7 +110,7 @@ export interface PackageDocInput {
   packageName: string;
   summaryLlm: LlmConfig;
   docLlm: LlmConfig;
-  mode?: "realtime" | "batch";
+
   maxTotalTokens?: number;
   templateType?: "default" | "minimal" | "detailed" | "custom";
   templateCustom?: string;

@@ -59,12 +59,6 @@ public class GenerateDocHandler extends AbstractHandler {
         String docModel = store.getString(ConnectionPreferencePage.PREF_DOC_MODEL);
         String docBaseUrl = store.getString(ConnectionPreferencePage.PREF_DOC_BASE_URL);
 
-        // Processing mode
-        String mode = store.getString(ConnectionPreferencePage.PREF_MODE);
-        if (mode == null || mode.isBlank()) {
-            mode = "realtime";
-        }
-
         // Token budget
         int maxTotalTokens = store.getInt(ConnectionPreferencePage.PREF_MAX_TOKENS);
 
@@ -113,7 +107,6 @@ public class GenerateDocHandler extends AbstractHandler {
 
         final String fObjectName = objectName;
         final String fObjectType = objectType;
-        final String fMode = mode;
         final int fMaxTotalTokens = maxTotalTokens;
         final String fTemplateType = templateType;
         final String fTemplateCustom = templateCustom;
@@ -133,7 +126,7 @@ public class GenerateDocHandler extends AbstractHandler {
                         fObjectName, fObjectType,
                         summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
                         docProvider, docApiKey, docModel, docBaseUrl,
-                        fMode, fMaxTotalTokens,
+                        fMaxTotalTokens,
                         fTemplateType, fTemplateCustom,
                         fUserContext,
                         line -> {

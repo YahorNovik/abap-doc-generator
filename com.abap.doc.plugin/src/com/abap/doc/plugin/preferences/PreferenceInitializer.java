@@ -19,9 +19,6 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
         store.setDefault(ConnectionPreferencePage.PREF_DOC_PROVIDER, "gemini");
         store.setDefault(ConnectionPreferencePage.PREF_DOC_MODEL, "gemini-2.5-pro");
 
-        // Processing mode default
-        store.setDefault(ConnectionPreferencePage.PREF_MODE, "realtime");
-
         // Token budget default (0 = unlimited)
         store.setDefault(ConnectionPreferencePage.PREF_MAX_TOKENS, 500000);
 

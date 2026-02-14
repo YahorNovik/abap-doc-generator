@@ -29,9 +29,6 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
     public static final String PREF_DOC_MODEL = "docLlmModel";
     public static final String PREF_DOC_BASE_URL = "docLlmBaseUrl";
 
-    // Processing mode
-    public static final String PREF_MODE = "docMode";
-
     // Token budget
     public static final String PREF_MAX_TOKENS = "maxTotalTokens";
 
@@ -109,12 +106,6 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         addField(new StringFieldEditor(PREF_DOC_API_KEY, "Doc LLM API Key:", getFieldEditorParent()));
         addField(new ComboFieldEditor(PREF_DOC_MODEL, "Doc LLM Model:", MODEL_OPTIONS, getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_DOC_BASE_URL, "Doc LLM Base URL (optional):", getFieldEditorParent()));
-
-        // Mode
-        addField(new ComboFieldEditor(PREF_MODE, "Processing Mode:", new String[][] {
-            { "Real-time (instant, full price)", "realtime" },
-            { "Batch (async, 50% discount)", "batch" },
-        }, getFieldEditorParent()));
 
         // Token budget
         IntegerFieldEditor maxTokensField = new IntegerFieldEditor(
