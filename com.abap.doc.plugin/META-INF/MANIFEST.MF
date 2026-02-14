@@ -14,5 +14,6 @@ Require-Bundle: org.eclipse.ui,
  org.eclipse.ui.browser,
  org.eclipse.jface
 Bundle-RequiredExecutionEnvironment: JavaSE-21
+Import-Package: java.net.http
 Bundle-ActivationPolicy: lazy
 Eclipse-BundleShape: dir
