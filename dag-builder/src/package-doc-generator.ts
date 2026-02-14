@@ -92,6 +92,7 @@ async function processPackageObjects(
       const maxLevel = cluster.topologicalOrder.length > 0
         ? Math.max(0, ...Array.from(levels.values()))
         : 0;
+      log(`  Computed ${maxLevel + 1} topological level(s) for batch summarization.`);
 
       for (let level = 0; level <= maxLevel; level++) {
         const nodesAtLevel = cluster.topologicalOrder.filter((n) => levels.get(n) === level);
@@ -112,6 +113,7 @@ async function processPackageObjects(
           batchRequests.push({ id: name, messages: buildSummaryPrompt(dagNode, source, depSums) });
         }
         if (batchRequests.length === 0) continue;
+        log(`  Level ${level}: ${batchRequests.length} node(s) — submitting batch...`);
         try {
           const results = await runBatch(input.summaryLlm, batchRequests);
           for (const [name, response] of results) {
@@ -119,8 +121,18 @@ async function processPackageObjects(
             summaryTokens += response.usage.promptTokens + response.usage.completionTokens;
           }
         } catch (err) {
-          errors.push(`Batch failed for level ${level}: ${String(err)}`);
-          for (const req of batchRequests) summaries[req.id] = `[Batch summary unavailable]`;
+          log(`  Batch failed for level ${level}, falling back to realtime: ${String(err)}`);
+          for (const req of batchRequests) {
+            try {
+              const response = await callLlm(input.summaryLlm, req.messages);
+              summaries[req.id] = response.content;
+              summaryTokens += response.usage.promptTokens + response.usage.completionTokens;
+              log(`  Summarized ${req.id} (realtime fallback)`);
+            } catch (retryErr) {
+              summaries[req.id] = objectMap.get(req.id)?.description ?? "[Summary unavailable]";
+              errors.push(`Summary for ${req.id} failed: ${String(retryErr)}`);
+            }
+          }
         }
       }
     } else {

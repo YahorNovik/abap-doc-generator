@@ -71,6 +71,8 @@ export function buildDocPrompt(
 
   const system = [
     `You are an ABAP documentation expert. You are documenting an ${objectTypeLabel}: ${rootNode.name}.`,
+    "This is internal documentation for developers already familiar with the codebase.",
+    "Be concise — focus on what is not obvious from reading the code. Skip boilerplate explanations.",
     "Write functional, business-oriented documentation. Focus on WHAT the object does and WHY, not on technical signatures.",
     "Do NOT list every method with its parameters, return types, and exceptions. Instead, describe the business logic and functional capabilities.",
     "Use the dependency summaries to explain how the object interacts with its dependencies.",

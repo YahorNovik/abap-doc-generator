@@ -53,6 +53,7 @@ public class ChatView extends ViewPart {
     private final List<ChatMessage> conversation = new ArrayList<>();
     private String pendingUpdatedMarkdown;
     private String pendingUpdatedHtml;
+    private String pendingUpdatedPageName;
     private File currentPagesDirectory;
 
     @Override
@@ -232,12 +233,20 @@ public class ChatView extends ViewPart {
                         gr.getUserContext(),
                         conversationJson,
                         gr.getDocProvider(), gr.getDocApiKey(), gr.getDocModel(), gr.getDocBaseUrl(),
+                        gr.isPackage(),
                         line -> PluginConsole.println(line)
                     );
 
                     String reply = extractJsonString(result, "reply");
                     String updatedMd = extractJsonString(result, "updatedMarkdown");
                     String updatedHtml = extractJsonString(result, "updatedHtml");
+                    String updatedPageName = extractJsonString(result, "updatedPageName");
+                    int promptTokens = extractInt(result, "promptTokens");
+                    int completionTokens = extractInt(result, "completionTokens");
+                    int totalTokens = promptTokens + completionTokens;
+                    if (totalTokens > 0) {
+                        PluginConsole.println("[chat] " + totalTokens + " tokens used (prompt: " + promptTokens + ", completion: " + completionTokens + ")");
+                    }
 
                     Display.getDefault().asyncExec(() -> {
                         if (chatHistory.isDisposed()) return;
@@ -245,13 +254,24 @@ public class ChatView extends ViewPart {
                         conversation.add(new ChatMessage("assistant", reply));
                         appendToChatHistory("Assistant", reply);
 
+                        String tokenInfo = totalTokens > 0 ? " (" + totalTokens + " tokens)" : "";
+
                         if (updatedMd != null && !updatedMd.isEmpty()) {
                             pendingUpdatedMarkdown = updatedMd;
                             pendingUpdatedHtml = updatedHtml;
+                            pendingUpdatedPageName = updatedPageName;
                             applyAction.setEnabled(true);
-                            statusLabel.setText("Update available. Click Apply in the toolbar.");
+
+                            boolean apply = MessageDialog.openConfirm(
+                                getSite().getShell(), "ABAP Doc",
+                                "The documentation has been updated. Apply changes?");
+                            if (apply) {
+                                handleApply();
+                            } else {
+                                statusLabel.setText("Update available. Click Apply in the toolbar." + tokenInfo);
+                            }
                         } else {
-                            statusLabel.setText("Ready.");
+                            statusLabel.setText("Ready." + tokenInfo);
                         }
 
                         sendButton.setEnabled(true);
@@ -284,8 +304,15 @@ public class ChatView extends ViewPart {
             if (pendingUpdatedHtml != null) {
                 gr.setHtml(pendingUpdatedHtml);
 
-                if (gr.isPackage() && currentPagesDirectory != null) {
-                    // Write to the index file and refresh
+                if (gr.isPackage() && currentPagesDirectory != null && pendingUpdatedPageName != null) {
+                    // Write to the specific object page file
+                    File pageFile = new File(currentPagesDirectory, pendingUpdatedPageName);
+                    pageFile.getParentFile().mkdirs();
+                    Files.writeString(pageFile.toPath(), pendingUpdatedHtml, StandardCharsets.UTF_8);
+                    browser.setUrl(pageFile.toURI().toString());
+                    PluginConsole.println("[chat] Updated page: " + pendingUpdatedPageName);
+                } else if (gr.isPackage() && currentPagesDirectory != null) {
+                    // Fallback: write to index
                     File indexFile = new File(currentPagesDirectory, "index.html");
                     Files.writeString(indexFile.toPath(), pendingUpdatedHtml, StandardCharsets.UTF_8);
                     browser.setUrl(indexFile.toURI().toString());
@@ -305,6 +332,7 @@ public class ChatView extends ViewPart {
 
         pendingUpdatedMarkdown = null;
         pendingUpdatedHtml = null;
+        pendingUpdatedPageName = null;
         applyAction.setEnabled(false);
     }
 
@@ -324,6 +352,26 @@ public class ChatView extends ViewPart {
         }
         sb.append("]");
         return sb.toString();
+    }
+
+    private static int extractInt(String json, String key) {
+        String search = "\"" + key + "\":";
+        int keyIdx = json.indexOf(search);
+        if (keyIdx == -1) return 0;
+        int afterKey = keyIdx + search.length();
+        while (afterKey < json.length() && Character.isWhitespace(json.charAt(afterKey))) {
+            afterKey++;
+        }
+        int start = afterKey;
+        while (afterKey < json.length() && Character.isDigit(json.charAt(afterKey))) {
+            afterKey++;
+        }
+        if (start == afterKey) return 0;
+        try {
+            return Integer.parseInt(json.substring(start, afterKey));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private static String extractJsonString(String json, String key) {

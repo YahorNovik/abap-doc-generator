@@ -241,11 +241,12 @@ public class DagRunner {
                        String documentation, String userContext,
                        String conversationJson,
                        String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                       boolean isPackage,
                        Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildChatInputJson(systemUrl, client, username, password,
             objectName, objectType, documentation, userContext, conversationJson,
-            docProvider, docApiKey, docModel, docBaseUrl);
+            docProvider, docApiKey, docModel, docBaseUrl, isPackage);
         return runScript(input, progressCallback);
     }
 
@@ -253,7 +254,8 @@ public class DagRunner {
                                               String objectName, String objectType,
                                               String documentation, String userContext,
                                               String conversationJson,
-                                              String docProvider, String docApiKey, String docModel, String docBaseUrl) {
+                                              String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                                              boolean isPackage) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"chat\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -267,6 +269,9 @@ public class DagRunner {
             sb.append(",\"userContext\":\"").append(escapeJson(userContext)).append("\"");
         }
         sb.append(",\"conversation\":").append(conversationJson);
+        if (isPackage) {
+            sb.append(",\"isPackage\":true");
+        }
         sb.append(",\"docLlm\":{");
         sb.append("\"provider\":\"").append(escapeJson(docProvider)).append("\"");
         sb.append(",\"apiKey\":\"").append(escapeJson(docApiKey)).append("\"");

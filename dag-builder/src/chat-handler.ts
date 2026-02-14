@@ -18,12 +18,14 @@ export interface ChatInput {
   userContext?: string;
   conversation: Array<{ role: string; content: string }>;
   docLlm: LlmConfig;
+  isPackage?: boolean;            // true when chatting about a package doc object
 }
 
 export interface ChatResult {
   reply: string;
   updatedMarkdown?: string;
   updatedHtml?: string;
+  updatedPageName?: string;       // for package docs: which page file to update
   tokenUsage: { promptTokens: number; completionTokens: number };
 }
 
@@ -31,34 +33,31 @@ function log(msg: string): void {
   process.stderr.write(`[chat] ${msg}\n`);
 }
 
-const CHAT_SYSTEM_PROMPT = `You are an expert ABAP documentation assistant. You are discussing the documentation for an ABAP object with the user.
+const CHAT_SYSTEM_PROMPT = `You are the documentation agent that generated the ABAP documentation shown below.
 
 ## Your Role
-- Answer questions about the documented ABAP object
-- Explain code behavior, patterns, and architecture
-- Suggest improvements to the documentation
-- Update the documentation when the user requests changes
+- Explain your documentation decisions and answer questions about the documented objects
+- Provide additional context about code behavior, patterns, and architecture
+- Modify the documentation when the user requests changes
 
-## Current Documentation
-The user has already generated documentation (provided below). Use it as context for the conversation.
+The documentation was auto-generated from source code analysis. The user may have additional context about the business purpose that was not visible in the code.
 
 ## Tools
-You have access to tools that let you inspect the SAP system:
-- **get_source**: Fetch the ABAP source code of any object
+You have access to SAP system inspection tools:
+- **get_source**: Fetch ABAP source code of any object
 - **get_where_used**: Find where an object is referenced
 
-Use these tools when you need to verify details or gather more information.
+Use these tools when you need to verify details or gather more information beyond what is already provided.
 
 ## Updating Documentation
-When the user asks you to update, modify, improve, or change the documentation, produce the full updated documentation wrapped in delimiters:
+When the user asks to update, modify, improve, or change the documentation, output the full updated markdown wrapped in:
 
 <updated_doc>
-(full updated markdown documentation here)
+(complete updated markdown)
 </updated_doc>
 
-Include the COMPLETE updated document, not just the changed sections. The user will be able to apply the update with a single click.
-
-If the user is just asking a question or discussing (not requesting changes), respond normally without the <updated_doc> block.`;
+Include the COMPLETE document, not just changed sections.
+If just answering a question, respond normally without the block.`;
 
 export async function handleChat(input: ChatInput): Promise<ChatResult> {
   log(`Chat request for ${input.objectName} (${input.objectType})`);
@@ -125,6 +124,9 @@ export async function handleChat(input: ChatInput): Promise<ChatResult> {
       updatedMarkdown: result.updatedMarkdown,
       updatedHtml: result.updatedMarkdown
         ? renderSingleObjectHtml(input.objectName, result.updatedMarkdown)
+        : undefined,
+      updatedPageName: result.updatedMarkdown && input.isPackage
+        ? `${input.objectName}.html`
         : undefined,
       tokenUsage: {
         promptTokens: response.usage.promptTokens,
