@@ -152,6 +152,50 @@ export function buildDocPrompt(
 }
 
 /**
+ * Builds prompt for triaging which objects deserve full documentation.
+ * Used with the cheap/fast model after all summaries are generated.
+ * Returns a list of object names that should get full docs.
+ */
+export function buildTriagePrompt(
+  objects: Array<{ name: string; type: string; summary: string; sourceLines: number; depCount: number; usedByCount: number }>,
+): LlmMessage[] {
+  const system = [
+    "You are an ABAP documentation expert deciding which objects in a package deserve full, detailed documentation.",
+    "",
+    "Objects that SHOULD get full documentation:",
+    "- Complex classes with significant business logic",
+    "- Key interfaces that define contracts",
+    "- Entry points, API classes, or facade patterns",
+    "- Objects with multiple dependencies or many consumers",
+    "- Objects that are hard to understand from source alone",
+    "",
+    "Objects that should NOT get full documentation (summary is enough):",
+    "- Simple data containers, constants, or enums",
+    "- Trivial helper/utility classes with obvious behavior",
+    "- Generated code or boilerplate (e.g., MPC/DPC classes)",
+    "- Very small objects (< 30 lines) with clear purpose",
+    "- Standard framework implementations with no custom logic",
+    "",
+    "Output ONLY the names of objects that should get full documentation, one per line.",
+    "Do NOT include any other text, explanations, or formatting.",
+  ].join("\n");
+
+  const parts: string[] = [
+    `Package contains ${objects.length} objects. Decide which ones need full documentation:`,
+    "",
+  ];
+
+  for (const obj of objects) {
+    parts.push(`- ${obj.name} (${obj.type}, ${obj.sourceLines} lines, ${obj.depCount} deps, used by ${obj.usedByCount}) — ${obj.summary}`);
+  }
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: parts.join("\n") },
+  ];
+}
+
+/**
  * Builds prompt for generating a cluster summary from individual object summaries.
  * Used with the cheap/fast model. First line of response = suggested cluster name.
  */

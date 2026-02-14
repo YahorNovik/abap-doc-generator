@@ -3,7 +3,7 @@ import { fetchPackageObjects, buildPackageGraph, detectClusters } from "./packag
 import { callLlm, callLlmAgentLoop, runBatch } from "./llm-client";
 import { computeTopologicalLevels } from "./doc-generator";
 import {
-  buildSummaryPrompt, buildDocPrompt,
+  buildSummaryPrompt, buildDocPrompt, buildTriagePrompt,
   buildClusterSummaryPrompt, buildPackageOverviewPrompt,
 } from "./prompts";
 import { AGENT_TOOLS } from "./tools";
@@ -172,8 +172,50 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         }
       }
 
-      // 5b. Generate individual object docs
+      // 5b. Triage: decide which objects need full documentation
+      const triageSet = new Set<string>();
+      if (cluster.objects.length > 1) {
+        const triageInput = cluster.objects
+          .filter((o) => sources.has(o.name))
+          .map((o) => {
+            const srcLines = (sources.get(o.name) ?? "").split("\n").length;
+            const depCount = (edgesByFrom.get(o.name) ?? []).length;
+            const usedByCount = cluster.internalEdges.filter((e) => e.to === o.name).length;
+            return {
+              name: o.name, type: o.type,
+              summary: summaries[o.name] ?? o.description,
+              sourceLines: srcLines, depCount, usedByCount,
+            };
+          });
+
+        const triageMessages = buildTriagePrompt(triageInput);
+        try {
+          const triageResponse = await callLlm(input.summaryLlm, triageMessages);
+          summaryTokens += triageResponse.usage.promptTokens + triageResponse.usage.completionTokens;
+          const selectedNames = triageResponse.content
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l.length > 0);
+          for (const name of selectedNames) {
+            triageSet.add(name);
+          }
+          log(`  Triage: ${triageSet.size}/${cluster.objects.length} objects selected for full documentation.`);
+        } catch (err) {
+          // On triage failure, generate docs for all objects
+          errors.push(`Triage failed: ${String(err)}, generating docs for all objects.`);
+          for (const o of cluster.objects) triageSet.add(o.name);
+        }
+      } else {
+        // Single-object cluster: always generate full doc
+        for (const o of cluster.objects) triageSet.add(o.name);
+      }
+
+      // 5c. Generate individual object docs (only for triaged objects)
       for (const obj of cluster.objects) {
+        if (!triageSet.has(obj.name)) {
+          log(`  Skipping doc for ${obj.name} (triage: summary only).`);
+          continue;
+        }
         const source = sources.get(obj.name);
         if (!source) continue;
 
@@ -235,7 +277,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         }
       }
 
-      // 5c. Generate cluster summary
+      // 5d. Generate cluster summary
       if (cluster.name !== "Standalone Objects" && cluster.objects.length > 1) {
         const clusterObjectSummaries = cluster.objects.map((o) => ({
           name: o.name, type: o.type, summary: summaries[o.name] ?? o.description,
