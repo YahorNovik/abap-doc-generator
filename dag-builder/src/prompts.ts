@@ -245,7 +245,10 @@ export function buildPackageOverviewPrompt(
   clusterSummaries: Array<{ name: string; summary: string; objectCount: number }>,
   externalDependencies: Array<{ name: string; type: string; usedBy: string[] }>,
   userContext?: string,
+  subPackageSummaries?: Array<{ name: string; summary: string; objectCount: number }>,
 ): LlmMessage[] {
+  const hasSubPackages = subPackageSummaries && subPackageSummaries.length > 0;
+
   const system = [
     `You are an ABAP documentation expert. You are documenting ABAP package ${packageName}.`,
     "Write a package-level overview covering:",
@@ -253,7 +256,9 @@ export function buildPackageOverviewPrompt(
     "## Output Structure",
     "",
     "- **Overview** — What this package does from a business perspective. What business domain it serves. (1-2 paragraphs)",
-    "- **Architecture** — How the functional clusters relate to each other. Describe the high-level data flow, layers, and design patterns. (1-2 paragraphs)",
+    hasSubPackages
+      ? "- **Architecture** — How the sub-packages and functional clusters relate to each other. Describe the high-level data flow, layers, and design patterns. (1-2 paragraphs)"
+      : "- **Architecture** — How the functional clusters relate to each other. Describe the high-level data flow, layers, and design patterns. (1-2 paragraphs)",
     "",
     "Keep the overview under 500 words. Be thorough but concise.",
     "",
@@ -268,19 +273,34 @@ export function buildPackageOverviewPrompt(
     ] : []),
   ].join("\n");
 
-  const totalObjects = clusterSummaries.reduce((n, c) => n + c.objectCount, 0);
+  const totalObjects = clusterSummaries.reduce((n, c) => n + c.objectCount, 0)
+    + (subPackageSummaries?.reduce((n, sp) => n + sp.objectCount, 0) ?? 0);
   const parts: string[] = [
     `# Package: ${packageName}`,
     "",
-    `Contains ${totalObjects} objects in ${clusterSummaries.length} functional cluster(s).`,
-    "",
-    "## Functional Clusters",
   ];
 
-  for (const cluster of clusterSummaries) {
+  if (hasSubPackages) {
+    parts.push(`Contains ${totalObjects} objects across ${subPackageSummaries!.length} sub-package(s) and ${clusterSummaries.length} root-level cluster(s).`);
     parts.push("");
-    parts.push(`### ${cluster.name} (${cluster.objectCount} objects)`);
-    parts.push(cluster.summary);
+    parts.push("## Sub-Packages");
+    for (const sp of subPackageSummaries!) {
+      parts.push("");
+      parts.push(`### ${sp.name} (${sp.objectCount} objects)`);
+      parts.push(sp.summary);
+    }
+  } else {
+    parts.push(`Contains ${totalObjects} objects in ${clusterSummaries.length} functional cluster(s).`);
+  }
+
+  if (clusterSummaries.length > 0) {
+    parts.push("");
+    parts.push("## Functional Clusters");
+    for (const cluster of clusterSummaries) {
+      parts.push("");
+      parts.push(`### ${cluster.name} (${cluster.objectCount} objects)`);
+      parts.push(cluster.summary);
+    }
   }
 
   if (externalDependencies.length > 0) {
@@ -293,6 +313,46 @@ export function buildPackageOverviewPrompt(
 
   parts.push("");
   parts.push("Generate the package overview following the output structure from the system instructions.");
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: parts.join("\n") },
+  ];
+}
+
+/**
+ * Builds prompt for generating a sub-package summary from its cluster summaries.
+ * Used with the summary (cheap) model.
+ */
+export function buildSubPackageSummaryPrompt(
+  subPackageName: string,
+  clusterSummaries: Array<{ name: string; summary: string; objectCount: number }>,
+  externalDeps: Array<{ name: string; type: string; usedBy: string[] }>,
+): LlmMessage[] {
+  const system = [
+    "You are an ABAP documentation assistant.",
+    `Summarize sub-package ${subPackageName} in under 200 words.`,
+    "Focus on: what business capability this sub-package provides, how its objects work together.",
+    "Output plain text, no Markdown headers.",
+  ].join(" ");
+
+  const totalObjects = clusterSummaries.reduce((n, c) => n + c.objectCount, 0);
+  const parts: string[] = [
+    `Sub-package ${subPackageName} contains ${totalObjects} objects in ${clusterSummaries.length} cluster(s):`,
+    "",
+  ];
+
+  for (const cluster of clusterSummaries) {
+    parts.push(`- ${cluster.name} (${cluster.objectCount} objects): ${cluster.summary}`);
+  }
+
+  if (externalDeps.length > 0) {
+    parts.push("");
+    parts.push("Key external dependencies:");
+    for (const dep of externalDeps.slice(0, 10)) {
+      parts.push(`- ${dep.name} (${dep.type}) — used by: ${dep.usedBy.join(", ")}`);
+    }
+  }
 
   return [
     { role: "system", content: system },

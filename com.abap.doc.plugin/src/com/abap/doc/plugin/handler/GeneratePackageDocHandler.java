@@ -74,6 +74,10 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         String templateType = store.getString(ConnectionPreferencePage.PREF_TEMPLATE);
         String templateCustom = store.getString(ConnectionPreferencePage.PREF_TEMPLATE_CUSTOM);
 
+        // Sub-package depth
+        int maxSubPackageDepth = store.getInt(ConnectionPreferencePage.PREF_MAX_SUBPACKAGE_DEPTH);
+        if (maxSubPackageDepth <= 0) maxSubPackageDepth = 2;
+
         if (summaryApiKey.isBlank() || summaryModel.isBlank() || docApiKey.isBlank() || docModel.isBlank()) {
             MessageDialog.openError(shell, "ABAP Doc Generator",
                 "Please configure LLM settings in Preferences > ABAP Doc Generator");
@@ -110,6 +114,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         final String fTemplateType = templateType;
         final String fTemplateCustom = templateCustom;
         final String fUserContext = userContext;
+        final int fMaxSubPackageDepth = maxSubPackageDepth;
 
         Job job = new Job("Generating package documentation for " + packageName) {
             @Override
@@ -128,6 +133,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         fMode, fMaxTotalTokens,
                         fTemplateType, fTemplateCustom,
                         fUserContext,
+                        fMaxSubPackageDepth,
                         line -> {
                             monitor.subTask(line);
                             PluginConsole.println(line);
@@ -144,6 +150,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         File tempDir = Files.createTempDirectory("pkg-doc-" + packageName + "-").toFile();
                         for (Map.Entry<String, String> entry : pages.entrySet()) {
                             File pageFile = new File(tempDir, entry.getKey());
+                            // Ensure parent directories exist (for sub-package subdirectories)
+                            pageFile.getParentFile().mkdirs();
                             Files.writeString(pageFile.toPath(), entry.getValue(), StandardCharsets.UTF_8);
                         }
                         PluginConsole.println("HTML wiki written to " + tempDir.getAbsolutePath()

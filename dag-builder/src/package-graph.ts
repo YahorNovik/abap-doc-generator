@@ -2,7 +2,7 @@ import { AdtClientWrapper } from "./adt-client";
 import { extractDependencies } from "./abap-parser";
 import { isCustomObject } from "./classifier";
 import { UnionFind } from "./union-find";
-import { PackageObject, PackageGraph, Cluster, DagEdge, DagNode } from "./types";
+import { PackageObject, PackageGraph, Cluster, DagEdge, DagNode, SubPackageNode } from "./types";
 
 const RELEVANT_TYPES = new Set([
   "CLAS", "INTF", "PROG", "FUGR",
@@ -142,6 +142,78 @@ export function detectClusters(graph: PackageGraph): Cluster[] {
   }
 
   return clusters;
+}
+
+/**
+ * Recursively discovers the package hierarchy by fetching sub-packages (DEVC type)
+ * from ADT nodeContents. Returns a tree rooted at the given package.
+ */
+export async function discoverPackageTree(
+  client: AdtClientWrapper,
+  packageName: string,
+  maxDepth: number,
+  errors: string[],
+  currentDepth: number = 0,
+): Promise<SubPackageNode> {
+  const contents = await client.getPackageContents(packageName);
+
+  // Separate sub-packages from code objects
+  const subPackageEntries = contents.filter(
+    (obj) => obj.objectType.split("/")[0] === "DEVC",
+  );
+
+  const objects = contents
+    .filter((obj) => {
+      const type = obj.objectType.split("/")[0];
+      return RELEVANT_TYPES.has(type) && isCustomObject(obj.objectName);
+    })
+    .map((obj) => ({
+      name: obj.objectName.toUpperCase(),
+      type: obj.objectType.split("/")[0],
+      description: obj.description,
+      uri: obj.objectUri,
+    }));
+
+  // Recurse into sub-packages if within depth limit
+  const children: SubPackageNode[] = [];
+  if (currentDepth < maxDepth) {
+    for (const sp of subPackageEntries) {
+      try {
+        const child = await discoverPackageTree(
+          client, sp.objectName.toUpperCase(), maxDepth, errors, currentDepth + 1,
+        );
+        child.description = sp.description;
+        children.push(child);
+      } catch (err) {
+        errors.push(`Failed to fetch sub-package ${sp.objectName}: ${String(err)}`);
+      }
+    }
+  } else if (subPackageEntries.length > 0) {
+    errors.push(
+      `Sub-packages of ${packageName} skipped (depth limit ${maxDepth}): `
+      + subPackageEntries.map((sp) => sp.objectName).join(", "),
+    );
+  }
+
+  return {
+    name: packageName,
+    description: "",
+    depth: currentDepth,
+    objects,
+    children,
+  };
+}
+
+/** Flattens a package tree into BFS order. */
+export function flattenPackageTree(root: SubPackageNode): SubPackageNode[] {
+  const result: SubPackageNode[] = [];
+  const queue: SubPackageNode[] = [root];
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    result.push(node);
+    queue.push(...node.children);
+  }
+  return result;
 }
 
 /**

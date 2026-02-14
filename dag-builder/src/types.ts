@@ -115,6 +115,16 @@ export interface PackageDocInput {
   templateType?: "default" | "minimal" | "detailed" | "custom";
   templateCustom?: string;
   userContext?: string;        // additional context/notes from the user
+  maxSubPackageDepth?: number; // recursion depth for sub-packages (default 2)
+}
+
+/** A node in the recursive package tree. */
+export interface SubPackageNode {
+  name: string;
+  description: string;
+  depth: number;
+  objects: PackageObject[];
+  children: SubPackageNode[];
 }
 
 export interface PackageObject {
@@ -150,6 +160,7 @@ export interface PackageDocResult {
   pages: Record<string, string>;
   objectCount: number;
   clusterCount: number;
+  subPackageCount?: number;
   summaries: Record<string, string>;
   clusterSummaries: Record<string, string>;
   objectDocs: Record<string, string>;

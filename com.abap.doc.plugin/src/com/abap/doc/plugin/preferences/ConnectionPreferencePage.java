@@ -42,6 +42,9 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
     // Save path
     public static final String PREF_SAVE_PATH = "docSavePath";
 
+    // Sub-package depth
+    public static final String PREF_MAX_SUBPACKAGE_DEPTH = "maxSubPackageDepth";
+
     // Confluence
     public static final String PREF_CONFLUENCE_URL = "confluenceUrl";
     public static final String PREF_CONFLUENCE_SPACE = "confluenceSpace";
@@ -122,6 +125,11 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         // Documentation template
         addField(new ComboFieldEditor(PREF_TEMPLATE, "Documentation Template:", TEMPLATE_OPTIONS, getFieldEditorParent()));
         addField(new StringFieldEditor(PREF_TEMPLATE_CUSTOM, "Custom Template (when Custom selected):", getFieldEditorParent()));
+
+        // Sub-package depth
+        IntegerFieldEditor depthField = new IntegerFieldEditor(PREF_MAX_SUBPACKAGE_DEPTH, "Sub-Package Depth (0 = root only):", getFieldEditorParent());
+        depthField.setValidRange(0, 5);
+        addField(depthField);
 
         // Save location
         addField(new StringFieldEditor(PREF_SAVE_PATH, "Default Save Directory:", getFieldEditorParent()));

@@ -74,12 +74,13 @@ public class DagRunner {
                                      String mode, int maxTotalTokens,
                                      String templateType, String templateCustom,
                                      String userContext,
+                                     int maxSubPackageDepth,
                                      Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildPackageDocInputJson(systemUrl, client, username, password, packageName,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
             docProvider, docApiKey, docModel, docBaseUrl, mode, maxTotalTokens,
-            templateType, templateCustom, userContext);
+            templateType, templateCustom, userContext, maxSubPackageDepth);
         return runScript(input, progressCallback);
     }
 
@@ -188,7 +189,8 @@ public class DagRunner {
                                                     String docProvider, String docApiKey, String docModel, String docBaseUrl,
                                                     String mode, int maxTotalTokens,
                                                     String templateType, String templateCustom,
-                                                    String userContext) {
+                                                    String userContext,
+                                                    int maxSubPackageDepth) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-package-doc\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -226,6 +228,9 @@ public class DagRunner {
         }
         if (userContext != null && !userContext.isEmpty()) {
             sb.append(",\"userContext\":\"").append(escapeJson(userContext)).append("\"");
+        }
+        if (maxSubPackageDepth > 0) {
+            sb.append(",\"maxSubPackageDepth\":").append(maxSubPackageDepth);
         }
         sb.append("}");
         return sb.toString();

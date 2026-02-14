@@ -90,6 +90,8 @@ public class SaveDocHandler extends AbstractHandler {
 
         for (Map.Entry<String, String> entry : gr.getPages().entrySet()) {
             File pageFile = new File(targetDir, entry.getKey());
+            // Ensure parent directories exist (for sub-package subdirectories)
+            pageFile.getParentFile().mkdirs();
             Files.writeString(pageFile.toPath(), entry.getValue(), StandardCharsets.UTF_8);
         }
 
