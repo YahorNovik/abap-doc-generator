@@ -150,6 +150,8 @@ public class ChatView extends ViewPart {
         };
         saveAction.setToolTipText("Save Documentation (Ctrl+Shift+S)");
         saveAction.setImageDescriptor(sharedImages.getImageDescriptor(ISharedImages.IMG_ETOOL_SAVE_EDIT));
+        saveAction.setDisabledImageDescriptor(sharedImages.getImageDescriptor(ISharedImages.IMG_ETOOL_SAVE_EDIT_DISABLED));
+        saveAction.setEnabled(true);
         toolbar.add(saveAction);
 
         // Apply

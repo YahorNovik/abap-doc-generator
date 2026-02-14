@@ -12,9 +12,9 @@ export function buildSummaryPrompt(
 ): LlmMessage[] {
   const system = [
     "You are an ABAP documentation assistant.",
-    "Summarize this ABAP object concisely.",
+    "Summarize this ABAP object in 2-4 sentences.",
     "Focus on: purpose, key capabilities, and business behavior.",
-    "Keep it under 200 words. Output plain text, no Markdown headers.",
+    "The summary must be at least 30 words. Output plain text, no Markdown headers.",
   ].join(" ");
 
   const parts: string[] = [

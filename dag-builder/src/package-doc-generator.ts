@@ -131,7 +131,7 @@ async function processPackageObjects(
           summaryTokens += result.value.usage.promptTokens + result.value.usage.completionTokens;
           log(`  Summarized ${name}`);
         } else {
-          summaries[name] = objectMap.get(name)?.description ?? "[Summary unavailable]";
+          summaries[name] = objectMap.get(name)?.description || "[Summary unavailable]";
           errors.push(`Summary for ${name} failed: ${String(result.reason)}`);
         }
       }
