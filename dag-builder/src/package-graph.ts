@@ -149,6 +149,21 @@ export function detectClusters(graph: PackageGraph): Cluster[] {
   return clusters;
 }
 
+function pkgLog(msg: string): void {
+  process.stderr.write(`[package-doc] ${msg}\n`);
+}
+
+/** Wraps a promise with a timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 /**
  * Recursively discovers the package hierarchy by fetching sub-packages (DEVC type)
  * from ADT nodeContents. Returns a tree rooted at the given package.
@@ -160,11 +175,17 @@ export async function discoverPackageTree(
   errors: string[],
   currentDepth: number = 0,
 ): Promise<SubPackageNode> {
-  const contents = await client.getPackageContents(packageName);
+  pkgLog(`  Fetching contents of ${packageName}...`);
+  const contents = await withTimeout(
+    client.getPackageContents(packageName),
+    30_000,
+    `getPackageContents(${packageName})`,
+  );
+  pkgLog(`  ${packageName}: ${contents.length} entries returned.`);
 
   // Separate sub-packages from code objects
   const subPackageEntries = contents.filter(
-    (obj) => obj.objectType.split("/")[0] === "DEVC",
+    (obj) => obj.objectType.split("/")[0] === "DEVC" && isCustomObject(obj.objectName),
   );
 
   const objects = contents
@@ -179,10 +200,13 @@ export async function discoverPackageTree(
       uri: obj.objectUri,
     }));
 
+  pkgLog(`  ${packageName}: ${objects.length} objects, ${subPackageEntries.length} sub-packages.`);
+
   // Recurse into sub-packages if within depth limit
   const children: SubPackageNode[] = [];
-  if (currentDepth < maxDepth) {
+  if (currentDepth < maxDepth && subPackageEntries.length > 0) {
     for (const sp of subPackageEntries) {
+      pkgLog(`  Recursing into sub-package ${sp.objectName}...`);
       try {
         const child = await discoverPackageTree(
           client, sp.objectName.toUpperCase(), maxDepth, errors, currentDepth + 1,
@@ -191,6 +215,7 @@ export async function discoverPackageTree(
         children.push(child);
       } catch (err) {
         errors.push(`Failed to fetch sub-package ${sp.objectName}: ${String(err)}`);
+        pkgLog(`  WARN: Sub-package ${sp.objectName} failed: ${String(err)}`);
       }
     }
   } else if (subPackageEntries.length > 0) {
