@@ -5,10 +5,10 @@ import { callLlm, callLlmAgentLoop } from "./llm-client";
 import { computeTopologicalLevels } from "./doc-generator";
 import {
   buildSummaryPrompt, buildDocPrompt, buildTriagePrompt,
-  buildClusterSummaryPrompt, buildPackageOverviewPrompt, buildSubPackageSummaryPrompt,
+  buildClusterSummaryPrompt, buildSubPackageSummaryPrompt,
 } from "./prompts";
 import { AGENT_TOOLS } from "./tools";
-import { resolveTemplate, PACKAGE_OVERVIEW_MAX_TOKENS, CLUSTER_SUMMARY_MAX_TOKENS } from "./templates";
+import { resolveTemplate, CLUSTER_SUMMARY_MAX_TOKENS } from "./templates";
 import {
   assembleHtmlWiki, renderFullPageHtml, renderSingleObjectHtml,
   assembleHierarchicalHtmlWiki, renderHierarchicalFullPageHtml,
@@ -294,27 +294,9 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       const result = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet);
       const aggregatedExternalDeps = aggregateExternalDeps(result.graph);
 
-      // Generate package overview
-      log("Generating package overview...");
-      const overviewMessages = buildPackageOverviewPrompt(
-        input.packageName,
-        result.clusters.map((c) => ({ name: c.name, summary: result.clusterSummaries[c.name] ?? "", objectCount: c.objects.length })),
-        aggregatedExternalDeps,
-        input.userContext,
-      );
-      let overviewText = "";
-      try {
-        const response = await callLlm({ ...input.docLlm, maxTokens: PACKAGE_OVERVIEW_MAX_TOKENS }, overviewMessages);
-        overviewText = response.content;
-        overviewTokens = response.usage.promptTokens + response.usage.completionTokens;
-      } catch (err) {
-        overviewText = `Package overview generation failed: ${String(err)}`;
-        errors.push(`Failed to generate package overview: ${String(err)}`);
-      }
-
-      const documentation = assembleDocument(input.packageName, overviewText, result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
-      const pages = assembleHtmlWiki(input.packageName, overviewText, result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
-      const singlePageHtml = renderFullPageHtml(input.packageName, overviewText, result.clusters, result.clusterSummaries, result.objectDocs, result.summaries);
+      const documentation = assembleDocument(input.packageName, "", result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
+      const pages = assembleHtmlWiki(input.packageName, "", result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
+      const singlePageHtml = renderFullPageHtml(input.packageName, "", result.clusters, result.clusterSummaries, result.objectDocs, result.summaries);
 
       const { summaryTokens, objectDocTokens, clusterSummaryTokens } = result.tokenUsage;
       const totalTokens = summaryTokens + objectDocTokens + clusterSummaryTokens + overviewTokens;
@@ -389,31 +371,6 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         totalClusterSummaryTokens += spResult.tokenUsage.clusterSummaryTokens;
       }
 
-      // Generate top-level package overview with sub-package summaries
-      log("Generating hierarchical package overview...");
-      const rootClusterSummaryInput = rootResult
-        ? rootResult.clusters.map((c) => ({ name: c.name, summary: rootResult!.clusterSummaries[c.name] ?? "", objectCount: c.objects.length }))
-        : [];
-      const subPackageSummaryInput = spRenderData.map((sp) => ({
-        name: sp.node.name,
-        summary: sp.subPackageSummary,
-        objectCount: sp.clusters.reduce((n, c) => n + c.objects.length, 0),
-      }));
-
-      const overviewMessages = buildPackageOverviewPrompt(
-        input.packageName, rootClusterSummaryInput, rootExternalDeps,
-        input.userContext, subPackageSummaryInput,
-      );
-      let overviewText = "";
-      try {
-        const response = await callLlm({ ...input.docLlm, maxTokens: PACKAGE_OVERVIEW_MAX_TOKENS }, overviewMessages);
-        overviewText = response.content;
-        overviewTokens = response.usage.promptTokens + response.usage.completionTokens;
-      } catch (err) {
-        overviewText = `Package overview generation failed: ${String(err)}`;
-        errors.push(`Failed to generate package overview: ${String(err)}`);
-      }
-
       // Assemble all outputs
       const rootClusters = rootResult?.clusters ?? [];
       const rootClusterSummaries = rootResult?.clusterSummaries ?? {};
@@ -421,15 +378,15 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       const rootSummaries = rootResult?.summaries ?? {};
 
       const documentation = assembleHierarchicalDocument(
-        input.packageName, overviewText, rootClusters, rootClusterSummaries,
+        input.packageName, "", rootClusters, rootClusterSummaries,
         rootObjectDocs, rootSummaries, rootExternalDeps, spRenderData,
       );
       const pages = assembleHierarchicalHtmlWiki(
-        input.packageName, overviewText, rootClusters, rootClusterSummaries,
+        input.packageName, "", rootClusters, rootClusterSummaries,
         rootObjectDocs, rootSummaries, rootExternalDeps, spRenderData,
       );
       const singlePageHtml = renderHierarchicalFullPageHtml(
-        input.packageName, overviewText, rootClusters, rootClusterSummaries,
+        input.packageName, "", rootClusters, rootClusterSummaries,
         rootObjectDocs, rootSummaries, spRenderData,
       );
 
