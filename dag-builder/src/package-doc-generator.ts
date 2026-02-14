@@ -5,7 +5,7 @@ import { callLlm, callLlmAgentLoop } from "./llm-client";
 import { computeTopologicalLevels } from "./doc-generator";
 import {
   buildSummaryPrompt, buildDocPrompt, buildTriagePrompt,
-  buildClusterSummaryPrompt, buildSubPackageSummaryPrompt,
+  buildClusterSummaryPrompt,
 } from "./prompts";
 import { AGENT_TOOLS } from "./tools";
 import { resolveTemplate, CLUSTER_SUMMARY_MAX_TOKENS } from "./templates";
@@ -341,28 +341,13 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet);
         const spExternalDeps = aggregateExternalDeps(spResult.graph);
 
-        // Generate sub-package summary
-        let subPackageSummary = "";
-        const spClusterSummaryInput = spResult.clusters.map((c) => ({
-          name: c.name, summary: spResult.clusterSummaries[c.name] ?? "", objectCount: c.objects.length,
-        }));
-        try {
-          const spSummaryMessages = buildSubPackageSummaryPrompt(spNode.name, spClusterSummaryInput, spExternalDeps);
-          const response = await callLlm({ ...input.summaryLlm, maxTokens: CLUSTER_SUMMARY_MAX_TOKENS }, spSummaryMessages);
-          subPackageSummary = response.content;
-          totalSummaryTokens += response.usage.promptTokens + response.usage.completionTokens;
-        } catch (err) {
-          subPackageSummary = spNode.description || `Sub-package ${spNode.name}`;
-          errors.push(`Failed to generate summary for sub-package ${spNode.name}: ${String(err)}`);
-        }
-
         spRenderData.push({
           node: spNode,
           clusters: spResult.clusters,
           clusterSummaries: spResult.clusterSummaries,
           objectDocs: spResult.objectDocs,
           summaries: spResult.summaries,
-          subPackageSummary,
+          subPackageSummary: "",
           externalDeps: spExternalDeps,
         });
 
