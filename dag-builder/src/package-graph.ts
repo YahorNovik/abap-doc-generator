@@ -234,6 +234,45 @@ export async function discoverPackageTree(
   };
 }
 
+/**
+ * Lightweight discovery: discovers the package tree and returns a flat object list
+ * with sub-package attribution. No source fetching, no LLM calls.
+ */
+export async function listPackageObjects(
+  client: AdtClientWrapper,
+  packageName: string,
+  maxDepth: number,
+): Promise<{ objects: Array<{ name: string; type: string; description: string; subPackage: string }>;
+             subPackages: string[];
+             errors: string[] }> {
+  const errors: string[] = [];
+
+  pkgLog(`Discovering package tree for ${packageName} (max depth: ${maxDepth})...`);
+  const tree = await discoverPackageTree(client, packageName, maxDepth, errors);
+  const allNodes = flattenPackageTree(tree);
+
+  const objects: Array<{ name: string; type: string; description: string; subPackage: string }> = [];
+  const subPackages: string[] = [];
+
+  for (const node of allNodes) {
+    if (node.depth > 0 && node.objects.length > 0) {
+      subPackages.push(node.name);
+    }
+    const subPkgLabel = node.depth === 0 ? "" : node.name;
+    for (const obj of node.objects) {
+      objects.push({
+        name: obj.name,
+        type: obj.type,
+        description: obj.description,
+        subPackage: subPkgLabel,
+      });
+    }
+  }
+
+  pkgLog(`Total: ${objects.length} objects across ${allNodes.length} package(s).`);
+  return { objects, subPackages, errors };
+}
+
 /** Flattens a package tree into BFS order. */
 export function flattenPackageTree(root: SubPackageNode): SubPackageNode[] {
   const result: SubPackageNode[] = [];

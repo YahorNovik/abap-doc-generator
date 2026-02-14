@@ -101,6 +101,28 @@ export interface DocResult {
 
 // ─── Package documentation types ───
 
+export interface ListObjectsInput {
+  command: "list-package-objects";
+  systemUrl: string;
+  client: string;
+  username: string;
+  password: string;
+  packageName: string;
+  maxSubPackageDepth?: number;
+}
+
+export interface ListObjectsResult {
+  packageName: string;
+  objects: Array<{
+    name: string;
+    type: string;
+    description: string;
+    subPackage: string;
+  }>;
+  subPackages: string[];
+  errors: string[];
+}
+
 export interface PackageDocInput {
   command: "generate-package-doc";
   systemUrl: string;
@@ -116,6 +138,7 @@ export interface PackageDocInput {
   templateCustom?: string;
   userContext?: string;        // additional context/notes from the user
   maxSubPackageDepth?: number; // recursion depth for sub-packages (default 2)
+  excludedObjects?: string[];  // object names to skip docs for (still in diagrams)
 }
 
 /** A node in the recursive package tree. */

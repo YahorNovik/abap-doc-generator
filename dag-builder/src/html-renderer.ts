@@ -298,9 +298,8 @@ export function buildIndexPage(
     if (linkedObjects.length > 0) {
       parts.push(`<div class="toc"><ul>`);
       for (const obj of linkedObjects) {
-        const isSummaryOnly = !objectDocs?.[obj.name] && summaries?.[obj.name];
-        const summarySnippet = isSummaryOnly
-          ? ` <span class="obj-desc">— ${escapeHtml(summaries![obj.name].substring(0, 120))}${summaries![obj.name].length > 120 ? "..." : ""}</span>`
+        const summarySnippet = summaries?.[obj.name]
+          ? ` <span class="obj-desc">— ${escapeHtml(summaries[obj.name].substring(0, 120))}${summaries[obj.name].length > 120 ? "..." : ""}</span>`
           : (obj.description ? ` <span class="obj-desc">— ${escapeHtml(obj.description)}</span>` : "");
         parts.push(
           `<li><a href="${linkPrefix}${obj.name}.html">${escapeHtml(obj.name)}</a>`
@@ -315,23 +314,8 @@ export function buildIndexPage(
     parts.push(`</div>`);
   }
 
-  // External dependencies
-  if (externalDeps.length > 0) {
-    parts.push(`<hr>`);
-    parts.push(`<h2>External Dependencies</h2>`);
-    parts.push(`<ul>`);
-    for (const dep of externalDeps.slice(0, 30)) {
-      const usedByLinks = dep.usedBy
-        .map((u) =>
-          knownObjects.has(u) ? `<a href="${linkPrefix}${u}.html">${escapeHtml(u)}</a>` : escapeHtml(u),
-        )
-        .join(", ");
-      parts.push(
-        `<li><strong>${escapeHtml(dep.name)}</strong> (${escapeHtml(dep.type)}) — used by: ${usedByLinks}</li>`,
-      );
-    }
-    parts.push(`</ul>`);
-  }
+  // External dependencies (collapsed)
+  parts.push(renderExternalDepsHtml(externalDeps, knownObjects, linkPrefix));
 
   return wrapHtmlPage(`Package ${packageName}`, parts.join("\n"));
 }
@@ -708,8 +692,7 @@ export function assembleHierarchicalHtmlWiki(
       if (linkedObjects.length > 0) {
         rootParts.push(`<div class="toc"><ul>`);
         for (const obj of linkedObjects) {
-          const isSummaryOnly = !rootObjectDocs[obj.name] && rootSummaries[obj.name];
-          const snippet = isSummaryOnly
+          const snippet = rootSummaries[obj.name]
             ? ` <span class="obj-desc">— ${escapeHtml(rootSummaries[obj.name].substring(0, 120))}${rootSummaries[obj.name].length > 120 ? "..." : ""}</span>`
             : "";
           rootParts.push(
@@ -725,18 +708,8 @@ export function assembleHierarchicalHtmlWiki(
     }
   }
 
-  // External deps
-  if (rootExternalDeps.length > 0) {
-    rootParts.push(`<hr>`);
-    rootParts.push(`<h2>External Dependencies</h2>`);
-    rootParts.push(`<ul>`);
-    for (const dep of rootExternalDeps.slice(0, 30)) {
-      rootParts.push(
-        `<li><strong>${escapeHtml(dep.name)}</strong> (${escapeHtml(dep.type)}) — used by: ${dep.usedBy.map((u) => escapeHtml(u)).join(", ")}</li>`,
-      );
-    }
-    rootParts.push(`</ul>`);
-  }
+  // External deps (collapsed)
+  rootParts.push(renderExternalDepsHtml(rootExternalDeps));
 
   pages["index.html"] = wrapHtmlPage(`Package ${packageName}`, rootParts.join("\n"));
   return pages;
@@ -856,4 +829,46 @@ function escapeRegex(str: string): string {
 
 function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/** Renders external deps with first 3 visible and the rest collapsed. */
+function renderExternalDepsHtml(
+  deps: Array<{ name: string; type: string; usedBy: string[] }>,
+  knownObjects?: Set<string>,
+  linkPrefix?: string,
+): string {
+  if (deps.length === 0) return "";
+  const prefix = linkPrefix ?? "";
+  const VISIBLE_COUNT = 3;
+
+  function renderDepItem(dep: { name: string; type: string; usedBy: string[] }): string {
+    const usedByLinks = dep.usedBy
+      .map((u) =>
+        knownObjects?.has(u) ? `<a href="${prefix}${u}.html">${escapeHtml(u)}</a>` : escapeHtml(u),
+      )
+      .join(", ");
+    return `<li><strong>${escapeHtml(dep.name)}</strong> (${escapeHtml(dep.type)}) — used by: ${usedByLinks}</li>`;
+  }
+
+  const parts: string[] = [];
+  parts.push(`<hr>`);
+  parts.push(`<h2>External Dependencies</h2>`);
+  parts.push(`<ul>`);
+  for (const dep of deps.slice(0, VISIBLE_COUNT)) {
+    parts.push(renderDepItem(dep));
+  }
+  parts.push(`</ul>`);
+
+  if (deps.length > VISIBLE_COUNT) {
+    parts.push(`<details>`);
+    parts.push(`<summary>Show all ${deps.length} external dependencies...</summary>`);
+    parts.push(`<ul>`);
+    for (const dep of deps.slice(VISIBLE_COUNT)) {
+      parts.push(renderDepItem(dep));
+    }
+    parts.push(`</ul>`);
+    parts.push(`</details>`);
+  }
+
+  return parts.join("\n");
 }

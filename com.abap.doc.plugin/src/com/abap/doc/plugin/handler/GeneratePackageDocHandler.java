@@ -3,7 +3,9 @@ package com.abap.doc.plugin.handler;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.eclipse.core.commands.AbstractHandler;
@@ -109,119 +111,184 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         final String fUserContext = userContext;
         final int fMaxSubPackageDepth = maxSubPackageDepth;
 
-        Job job = new Job("Generating package documentation for " + packageName) {
+        // Phase 1: Fetch object list from SAP
+        Job listJob = new Job("Fetching package objects for " + packageName) {
             @Override
             protected IStatus run(IProgressMonitor monitor) {
-                monitor.beginTask("Generating package documentation for " + packageName, IProgressMonitor.UNKNOWN);
+                monitor.beginTask("Discovering package objects...", IProgressMonitor.UNKNOWN);
                 PluginConsole.clear();
                 PluginConsole.show();
-                PluginConsole.println("Generating package documentation for " + packageName);
+                PluginConsole.println("Discovering objects in package " + packageName + "...");
                 try {
                     DagRunner runner = new DagRunner();
-                    String resultJson = runner.generatePackageDoc(
+                    String objectListJson = runner.listPackageObjects(
                         systemUrl, client, username, password,
-                        packageName,
-                        summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
-                        docProvider, docApiKey, docModel, docBaseUrl,
-                        fMaxTotalTokens,
-                        fTemplateType, fTemplateCustom,
-                        fUserContext,
-                        fMaxSubPackageDepth,
+                        packageName, fMaxSubPackageDepth,
                         line -> {
                             monitor.subTask(line);
                             PluginConsole.println(line);
                         });
 
-                    // Extract token usage for display
-                    String tokenInfo = extractPackageTokenUsage(resultJson);
+                    List<ObjectSelectionDialog.PackageObjectItem> objects = parseObjectList(objectListJson);
+                    PluginConsole.println("Found " + objects.size() + " objects.");
 
-                    // Extract multi-page HTML wiki
-                    Map<String, String> pages = extractPages(resultJson);
-
-                    if (!pages.isEmpty()) {
-                        // Write pages to temp directory and open in browser
-                        File tempDir = Files.createTempDirectory("pkg-doc-" + packageName + "-").toFile();
-                        for (Map.Entry<String, String> entry : pages.entrySet()) {
-                            File pageFile = new File(tempDir, entry.getKey());
-                            // Ensure parent directories exist (for sub-package subdirectories)
-                            pageFile.getParentFile().mkdirs();
-                            Files.writeString(pageFile.toPath(), entry.getValue(), StandardCharsets.UTF_8);
-                        }
-                        PluginConsole.println("HTML wiki written to " + tempDir.getAbsolutePath()
-                            + " (" + pages.size() + " pages)");
-
-                        // Store result for chat and save features
-                        GenerationResult gr = GenerationResult.getInstance();
-                        gr.clear();
-                        gr.setObjectName(packageName);
-                        gr.setObjectType("PACKAGE");
-                        gr.setPackage(true);
-                        gr.setMarkdown(extractDocumentation(resultJson));
-                        gr.setSinglePageHtml(extractJsonStringField(resultJson, "singlePageHtml"));
-                        gr.setPages(pages);
-                        gr.setPagesDirectory(tempDir);
-                        gr.setSystemUrl(systemUrl);
-                        gr.setClient(client);
-                        gr.setUsername(username);
-                        gr.setPassword(password);
-                        gr.setDocProvider(docProvider);
-                        gr.setDocApiKey(docApiKey);
-                        gr.setDocModel(docModel);
-                        gr.setDocBaseUrl(docBaseUrl);
-                        gr.setMaxTotalTokens(fMaxTotalTokens);
-                        gr.setUserContext(fUserContext);
-
-                        display.asyncExec(() -> {
-                            try {
-                                IWorkbenchPage page = PlatformUI.getWorkbench()
-                                    .getActiveWorkbenchWindow().getActivePage();
-                                ChatView view = (ChatView) page.showView(ChatView.ID);
-                                view.showPackageDoc(tempDir);
-                                MessageDialog.openInformation(shell, "ABAP Doc Generator",
-                                    "Package documentation generated for " + packageName + "\n\n" + tokenInfo);
-                            } catch (Exception e) {
-                                MessageDialog.openError(shell, "ABAP Doc Generator",
-                                    "Failed to open result: " + e.getMessage());
-                            }
-                        });
-                    } else {
-                        // Fallback: open markdown in editor
-                        String documentation = extractDocumentation(resultJson);
-                        File tempFile = File.createTempFile("pkg-doc-" + packageName + "-", ".md");
-                        tempFile.deleteOnExit();
-                        Files.writeString(tempFile.toPath(), documentation, StandardCharsets.UTF_8);
-
-                        display.asyncExec(() -> {
-                            try {
-                                org.eclipse.ui.IWorkbenchPage page = PlatformUI.getWorkbench()
-                                    .getActiveWorkbenchWindow().getActivePage();
-                                org.eclipse.ui.ide.IDE.openEditorOnFileStore(page,
-                                    org.eclipse.core.filesystem.EFS.getLocalFileSystem()
-                                        .fromLocalFile(tempFile));
-                                MessageDialog.openInformation(shell, "ABAP Doc Generator",
-                                    "Package documentation generated for " + packageName + "\n\n" + tokenInfo);
-                            } catch (Exception e) {
-                                MessageDialog.openError(shell, "ABAP Doc Generator",
-                                    "Failed to open result: " + e.getMessage());
-                            }
-                        });
+                    if (objects.isEmpty()) {
+                        display.asyncExec(() ->
+                            MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                                "No relevant custom objects found in package " + packageName));
+                        return Status.OK_STATUS;
                     }
+
+                    // Show selection dialog on UI thread
+                    final String[][] excludedHolder = new String[1][];
+                    final boolean[] dialogOk = {false};
+
+                    display.syncExec(() -> {
+                        ObjectSelectionDialog selDialog = new ObjectSelectionDialog(shell, objects);
+                        if (selDialog.open() == Window.OK) {
+                            excludedHolder[0] = selDialog.getExcludedObjects();
+                            dialogOk[0] = true;
+                        }
+                    });
+
+                    if (!dialogOk[0]) {
+                        PluginConsole.println("Object selection cancelled by user.");
+                        return Status.CANCEL_STATUS;
+                    }
+
+                    String[] excludedObjects = excludedHolder[0];
+                    PluginConsole.println("Excluded " + excludedObjects.length + " objects from documentation.");
+
+                    // Phase 2: Generate documentation
+                    Job genJob = new Job("Generating package documentation for " + packageName) {
+                        @Override
+                        protected IStatus run(IProgressMonitor genMonitor) {
+                            genMonitor.beginTask("Generating package documentation...", IProgressMonitor.UNKNOWN);
+                            PluginConsole.println("Starting documentation generation for " + packageName + "...");
+                            try {
+                                DagRunner genRunner = new DagRunner();
+                                String resultJson = genRunner.generatePackageDoc(
+                                    systemUrl, client, username, password,
+                                    packageName,
+                                    summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
+                                    docProvider, docApiKey, docModel, docBaseUrl,
+                                    fMaxTotalTokens,
+                                    fTemplateType, fTemplateCustom,
+                                    fUserContext,
+                                    fMaxSubPackageDepth,
+                                    excludedObjects,
+                                    line -> {
+                                        genMonitor.subTask(line);
+                                        PluginConsole.println(line);
+                                    });
+
+                                handleGenerationResult(resultJson, packageName, systemUrl, client,
+                                    username, password, docProvider, docApiKey, docModel, docBaseUrl,
+                                    fMaxTotalTokens, fUserContext, display, shell);
+
+                                return Status.OK_STATUS;
+                            } catch (Exception e) {
+                                display.asyncExec(() ->
+                                    MessageDialog.openError(shell, "ABAP Doc Generator",
+                                        "Failed to generate package documentation: " + e.getMessage()));
+                                return Status.error("Package documentation generation failed", e);
+                            } finally {
+                                genMonitor.done();
+                            }
+                        }
+                    };
+                    genJob.setUser(true);
+                    genJob.schedule();
 
                     return Status.OK_STATUS;
                 } catch (Exception e) {
                     display.asyncExec(() ->
                         MessageDialog.openError(shell, "ABAP Doc Generator",
-                            "Failed to generate package documentation: " + e.getMessage()));
-                    return Status.error("Package documentation generation failed", e);
+                            "Failed to fetch package objects: " + e.getMessage()));
+                    return Status.error("Failed to fetch package objects", e);
                 } finally {
                     monitor.done();
                 }
             }
         };
-        job.setUser(true);
-        job.schedule();
+        listJob.setUser(true);
+        listJob.schedule();
 
         return null;
+    }
+
+    private void handleGenerationResult(String resultJson, String packageName,
+                                         String systemUrl, String client, String username, String password,
+                                         String docProvider, String docApiKey, String docModel, String docBaseUrl,
+                                         int maxTotalTokens, String userContext,
+                                         Display display, Shell shell) throws Exception {
+        String tokenInfo = extractPackageTokenUsage(resultJson);
+        Map<String, String> pages = extractPages(resultJson);
+
+        if (!pages.isEmpty()) {
+            File tempDir = Files.createTempDirectory("pkg-doc-" + packageName + "-").toFile();
+            for (Map.Entry<String, String> entry : pages.entrySet()) {
+                File pageFile = new File(tempDir, entry.getKey());
+                pageFile.getParentFile().mkdirs();
+                Files.writeString(pageFile.toPath(), entry.getValue(), StandardCharsets.UTF_8);
+            }
+            PluginConsole.println("HTML wiki written to " + tempDir.getAbsolutePath()
+                + " (" + pages.size() + " pages)");
+
+            GenerationResult gr = GenerationResult.getInstance();
+            gr.clear();
+            gr.setObjectName(packageName);
+            gr.setObjectType("PACKAGE");
+            gr.setPackage(true);
+            gr.setMarkdown(extractDocumentation(resultJson));
+            gr.setSinglePageHtml(extractJsonStringField(resultJson, "singlePageHtml"));
+            gr.setPages(pages);
+            gr.setPagesDirectory(tempDir);
+            gr.setSystemUrl(systemUrl);
+            gr.setClient(client);
+            gr.setUsername(username);
+            gr.setPassword(password);
+            gr.setDocProvider(docProvider);
+            gr.setDocApiKey(docApiKey);
+            gr.setDocModel(docModel);
+            gr.setDocBaseUrl(docBaseUrl);
+            gr.setMaxTotalTokens(maxTotalTokens);
+            gr.setUserContext(userContext);
+
+            display.asyncExec(() -> {
+                try {
+                    IWorkbenchPage page = PlatformUI.getWorkbench()
+                        .getActiveWorkbenchWindow().getActivePage();
+                    ChatView view = (ChatView) page.showView(ChatView.ID);
+                    view.showPackageDoc(tempDir);
+                    MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                        "Package documentation generated for " + packageName + "\n\n" + tokenInfo);
+                } catch (Exception e) {
+                    MessageDialog.openError(shell, "ABAP Doc Generator",
+                        "Failed to open result: " + e.getMessage());
+                }
+            });
+        } else {
+            String documentation = extractDocumentation(resultJson);
+            File tempFile = File.createTempFile("pkg-doc-" + packageName + "-", ".md");
+            tempFile.deleteOnExit();
+            Files.writeString(tempFile.toPath(), documentation, StandardCharsets.UTF_8);
+
+            display.asyncExec(() -> {
+                try {
+                    org.eclipse.ui.IWorkbenchPage page = PlatformUI.getWorkbench()
+                        .getActiveWorkbenchWindow().getActivePage();
+                    org.eclipse.ui.ide.IDE.openEditorOnFileStore(page,
+                        org.eclipse.core.filesystem.EFS.getLocalFileSystem()
+                            .fromLocalFile(tempFile));
+                    MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                        "Package documentation generated for " + packageName + "\n\n" + tokenInfo);
+                } catch (Exception e) {
+                    MessageDialog.openError(shell, "ABAP Doc Generator",
+                        "Failed to open result: " + e.getMessage());
+                }
+            });
+        }
     }
 
     private static String extractDocumentation(String json) {
@@ -326,6 +393,70 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         } catch (NumberFormatException e) {
             return 0;
         }
+    }
+
+    /**
+     * Parses the list-package-objects JSON result into dialog items.
+     */
+    private static List<ObjectSelectionDialog.PackageObjectItem> parseObjectList(String json) {
+        List<ObjectSelectionDialog.PackageObjectItem> items = new ArrayList<>();
+        String key = "\"objects\":[";
+        int start = json.indexOf(key);
+        if (start == -1) return items;
+        int pos = start + key.length();
+
+        while (pos < json.length()) {
+            int objStart = json.indexOf('{', pos);
+            if (objStart == -1) break;
+            int objEnd = json.indexOf('}', objStart);
+            if (objEnd == -1) break;
+
+            String objJson = json.substring(objStart, objEnd + 1);
+            String name = extractSimpleField(objJson, "name");
+            String type = extractSimpleField(objJson, "type");
+            String description = extractSimpleField(objJson, "description");
+            String subPackage = extractSimpleField(objJson, "subPackage");
+
+            if (name != null && !name.isEmpty()) {
+                items.add(new ObjectSelectionDialog.PackageObjectItem(name, type, description, subPackage));
+            }
+
+            pos = objEnd + 1;
+            while (pos < json.length() && (json.charAt(pos) == ',' || Character.isWhitespace(json.charAt(pos)))) {
+                pos++;
+            }
+            if (pos < json.length() && json.charAt(pos) == ']') break;
+        }
+        return items;
+    }
+
+    private static String extractSimpleField(String json, String field) {
+        String key = "\"" + field + "\":\"";
+        int start = json.indexOf(key);
+        if (start == -1) return "";
+        start += key.length();
+
+        StringBuilder sb = new StringBuilder();
+        boolean escaped = false;
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (escaped) {
+                switch (c) {
+                    case 'n': sb.append('\n'); break;
+                    case '"': sb.append('"'); break;
+                    case '\\': sb.append('\\'); break;
+                    default: sb.append(c);
+                }
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                break;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**

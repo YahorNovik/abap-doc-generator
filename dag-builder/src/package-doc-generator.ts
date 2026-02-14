@@ -47,6 +47,7 @@ async function processPackageObjects(
   packageLabel: string,
   input: PackageDocInput,
   errors: string[],
+  excludedSet?: Set<string>,
 ): Promise<ProcessResult> {
   const summaries: Record<string, string> = {};
   const objectDocs: Record<string, string> = {};
@@ -101,6 +102,7 @@ async function processPackageObjects(
       // Build call specs for all nodes at this level
       const callSpecs: Array<{ name: string; messages: import("./types").LlmMessage[] }> = [];
       for (const name of nodesAtLevel) {
+        if (excludedSet?.has(name)) continue;
         const obj = objectMap.get(name);
         if (!obj) continue;
         const source = sources.get(name);
@@ -137,8 +139,9 @@ async function processPackageObjects(
 
     // Triage
     const triageSet = new Set<string>();
-    if (cluster.objects.length > 1) {
-      const triageInput = cluster.objects
+    const triageCandidates = cluster.objects.filter((o) => !excludedSet?.has(o.name));
+    if (triageCandidates.length > 1) {
+      const triageInput = triageCandidates
         .filter((o) => sources.has(o.name))
         .map((o) => {
           const srcLines = (sources.get(o.name) ?? "").split("\n").length;
@@ -152,17 +155,18 @@ async function processPackageObjects(
         for (const name of triageResponse.content.split("\n").map((l) => l.trim()).filter((l) => l.length > 0)) {
           triageSet.add(name);
         }
-        log(`  Triage: ${triageSet.size}/${cluster.objects.length} objects selected for full documentation.`);
+        log(`  Triage: ${triageSet.size}/${triageCandidates.length} objects selected for full documentation.`);
       } catch (err) {
         errors.push(`Triage failed: ${String(err)}, generating docs for all objects.`);
-        for (const o of cluster.objects) triageSet.add(o.name);
+        for (const o of triageCandidates) triageSet.add(o.name);
       }
     } else {
-      for (const o of cluster.objects) triageSet.add(o.name);
+      for (const o of triageCandidates) triageSet.add(o.name);
     }
 
-    // Generate individual object docs (only for triaged objects)
+    // Generate individual object docs (only for triaged objects, skip excluded)
     for (const obj of cluster.objects) {
+      if (excludedSet?.has(obj.name)) continue;
       if (!triageSet.has(obj.name)) {
         log(`  Skipping doc for ${obj.name} (triage: summary only).`);
         continue;
@@ -250,6 +254,9 @@ async function processPackageObjects(
 export async function generatePackageDocumentation(input: PackageDocInput): Promise<PackageDocResult> {
   const errors: string[] = [];
   let overviewTokens = 0;
+  const excludedSet = input.excludedObjects && input.excludedObjects.length > 0
+    ? new Set(input.excludedObjects)
+    : undefined;
 
   const client = await createConnectedClient(
     input.systemUrl, input.username, input.password, input.client,
@@ -284,7 +291,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         return emptyResult(input.packageName, errors);
       }
 
-      const result = await processPackageObjects(client, rootObjects, input.packageName, input, errors);
+      const result = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet);
       const aggregatedExternalDeps = aggregateExternalDeps(result.graph);
 
       // Generate package overview
@@ -331,7 +338,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       let rootExternalDeps: Array<{ name: string; type: string; usedBy: string[] }> = [];
       if (rootObjects.length > 0) {
         log(`Processing root package objects (${rootObjects.length})...`);
-        rootResult = await processPackageObjects(client, rootObjects, input.packageName, input, errors);
+        rootResult = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet);
         rootExternalDeps = aggregateExternalDeps(rootResult.graph);
       }
 
@@ -349,7 +356,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         }
 
         log(`Processing sub-package ${spNode.name} (${spObjects.length} objects)...`);
-        const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors);
+        const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet);
         const spExternalDeps = aggregateExternalDeps(spResult.graph);
 
         // Generate sub-package summary

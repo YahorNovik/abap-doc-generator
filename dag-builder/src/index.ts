@@ -1,7 +1,9 @@
-import { buildDag } from "./dag-builder";
+import { buildDag, createConnectedClient } from "./dag-builder";
 import { generateDocumentation } from "./doc-generator";
 import { generatePackageDocumentation } from "./package-doc-generator";
 import { handleChat } from "./chat-handler";
+import { listPackageObjects } from "./package-graph";
+import { ListObjectsResult } from "./types";
 
 async function main(): Promise<void> {
   const raw = await readStdin();
@@ -20,7 +22,28 @@ async function main(): Promise<void> {
   }
 
   try {
-    if (input.command === "generate-package-doc") {
+    if (input.command === "list-package-objects") {
+      if (!input.packageName) {
+        process.stderr.write("Error: packageName is required for list-package-objects\n");
+        process.exit(1);
+      }
+      const client = await createConnectedClient(
+        input.systemUrl, input.username, input.password, input.client,
+      );
+      try {
+        const maxDepth = input.maxSubPackageDepth ?? 2;
+        const data = await listPackageObjects(client, input.packageName, maxDepth);
+        const result: ListObjectsResult = {
+          packageName: input.packageName,
+          objects: data.objects,
+          subPackages: data.subPackages,
+          errors: data.errors,
+        };
+        process.stdout.write(JSON.stringify(result));
+      } finally {
+        try { await client.disconnect(); } catch { /* ignore */ }
+      }
+    } else if (input.command === "generate-package-doc") {
       if (!input.summaryLlm || !input.docLlm) {
         process.stderr.write("Error: summaryLlm and docLlm configs are required for generate-package-doc\n");
         process.exit(1);

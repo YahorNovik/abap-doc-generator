@@ -67,6 +67,14 @@ public class DagRunner {
         return runScript(input, progressCallback);
     }
 
+    public String listPackageObjects(String systemUrl, String client, String username, String password,
+                                      String packageName, int maxSubPackageDepth,
+                                      Consumer<String> progressCallback) throws IOException, InterruptedException {
+        String input = buildListObjectsInputJson(systemUrl, client, username, password,
+            packageName, maxSubPackageDepth);
+        return runScript(input, progressCallback);
+    }
+
     public String generatePackageDoc(String systemUrl, String client, String username, String password,
                                      String packageName,
                                      String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
@@ -75,12 +83,13 @@ public class DagRunner {
                                      String templateType, String templateCustom,
                                      String userContext,
                                      int maxSubPackageDepth,
+                                     String[] excludedObjects,
                                      Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildPackageDocInputJson(systemUrl, client, username, password, packageName,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
             docProvider, docApiKey, docModel, docBaseUrl, maxTotalTokens,
-            templateType, templateCustom, userContext, maxSubPackageDepth);
+            templateType, templateCustom, userContext, maxSubPackageDepth, excludedObjects);
         return runScript(input, progressCallback);
     }
 
@@ -180,6 +189,23 @@ public class DagRunner {
         return sb.toString();
     }
 
+    private static String buildListObjectsInputJson(String systemUrl, String client, String username,
+                                                     String password, String packageName,
+                                                     int maxSubPackageDepth) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"command\":\"list-package-objects\"");
+        sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
+        sb.append(",\"client\":\"").append(escapeJson(client)).append("\"");
+        sb.append(",\"username\":\"").append(escapeJson(username)).append("\"");
+        sb.append(",\"password\":\"").append(escapeJson(password)).append("\"");
+        sb.append(",\"packageName\":\"").append(escapeJson(packageName)).append("\"");
+        if (maxSubPackageDepth > 0) {
+            sb.append(",\"maxSubPackageDepth\":").append(maxSubPackageDepth);
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
     private static String buildPackageDocInputJson(String systemUrl, String client, String username, String password,
                                                     String packageName,
                                                     String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
@@ -187,7 +213,8 @@ public class DagRunner {
                                                     int maxTotalTokens,
                                                     String templateType, String templateCustom,
                                                     String userContext,
-                                                    int maxSubPackageDepth) {
+                                                    int maxSubPackageDepth,
+                                                    String[] excludedObjects) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-package-doc\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -225,6 +252,14 @@ public class DagRunner {
         }
         if (maxSubPackageDepth > 0) {
             sb.append(",\"maxSubPackageDepth\":").append(maxSubPackageDepth);
+        }
+        if (excludedObjects != null && excludedObjects.length > 0) {
+            sb.append(",\"excludedObjects\":[");
+            for (int i = 0; i < excludedObjects.length; i++) {
+                if (i > 0) sb.append(",");
+                sb.append("\"").append(escapeJson(excludedObjects[i])).append("\"");
+            }
+            sb.append("]");
         }
         sb.append("}");
         return sb.toString();
