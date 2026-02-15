@@ -576,15 +576,21 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       rootObjects = rootObjects.slice(0, MAX_PACKAGE_OBJECTS);
     }
 
-    // Build process options from precomputed Phase 2 data
-    const processOpts: ProcessOptions | undefined = (input.fullDocObjects || input.precomputedSummaries || input.precomputedClusterSummaries)
-      ? {
-          fullDocObjects: input.fullDocObjects ? new Set(input.fullDocObjects) : undefined,
-          precomputedSummaries: input.precomputedSummaries,
-          precomputedClusterSummaries: input.precomputedClusterSummaries,
-          precomputedClusterAssignments: input.precomputedClusterAssignments,
-        }
-      : undefined;
+    // Helper: filter composite-keyed maps by sub-package scope.
+    // Java sends keys as "SUBPKG::ClusterName" for sub-packages, plain "ClusterName" for root.
+    const hasPrecomputed = !!(input.fullDocObjects || input.precomputedSummaries || input.precomputedClusterSummaries);
+    const fullDocSet = input.fullDocObjects ? new Set(input.fullDocObjects) : undefined;
+
+    function buildScopedOpts(subPackageName?: string): ProcessOptions | undefined {
+      if (!hasPrecomputed) return undefined;
+      const prefix = subPackageName ? subPackageName + "::" : "";
+      return {
+        fullDocObjects: fullDocSet,
+        precomputedSummaries: input.precomputedSummaries,
+        precomputedClusterSummaries: filterByPrefix(input.precomputedClusterSummaries, prefix),
+        precomputedClusterAssignments: filterByPrefix(input.precomputedClusterAssignments, prefix),
+      };
+    }
 
     if (!hasSubPackages) {
       // ─── FLAT FLOW (no sub-packages) — existing behavior with summaries ───
@@ -592,7 +598,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         return emptyResult(input.packageName, errors);
       }
 
-      const result = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet, processOpts);
+      const result = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet, buildScopedOpts());
       const aggregatedExternalDeps = aggregateExternalDeps(result.graph);
 
       const documentation = assembleDocument(input.packageName, result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
@@ -621,7 +627,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       let rootExternalDeps: Array<{ name: string; type: string; usedBy: string[] }> = [];
       if (rootObjects.length > 0) {
         log(`Processing root package objects (${rootObjects.length})...`);
-        rootResult = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet, processOpts);
+        rootResult = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet, buildScopedOpts());
         rootExternalDeps = aggregateExternalDeps(rootResult.graph);
       }
 
@@ -644,7 +650,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         }
 
         log(`Processing sub-package ${spNode.name} (${spObjects.length} objects)...`);
-        const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet, processOpts);
+        const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet, buildScopedOpts(spNode.name));
         const spExternalDeps = aggregateExternalDeps(spResult.graph);
 
         spRenderData.push({
@@ -889,4 +895,28 @@ export function aggregateExternalDeps(
   return Array.from(depMap.entries())
     .map(([name, data]) => ({ name, type: data.type, usedBy: Array.from(data.usedBy) }))
     .sort((a, b) => b.usedBy.length - a.usedBy.length);
+}
+
+/**
+ * Filters a Record by composite key prefix.
+ * Keys like "SUBPKG::ClusterName" match prefix "SUBPKG::" → stripped to "ClusterName".
+ * Keys without "::" match empty prefix (root scope).
+ */
+function filterByPrefix<T>(map: Record<string, T> | undefined, prefix: string): Record<string, T> | undefined {
+  if (!map) return undefined;
+  const result: Record<string, T> = {};
+  for (const [key, value] of Object.entries(map)) {
+    if (prefix) {
+      // Sub-package scope: match "SUBPKG::name" → strip to "name"
+      if (key.startsWith(prefix)) {
+        result[key.slice(prefix.length)] = value;
+      }
+    } else {
+      // Root scope: match keys without "::"
+      if (!key.includes("::")) {
+        result[key] = value;
+      }
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }

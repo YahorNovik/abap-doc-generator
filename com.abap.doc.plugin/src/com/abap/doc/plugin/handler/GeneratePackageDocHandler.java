@@ -703,7 +703,10 @@ public class GeneratePackageDocHandler extends AbstractHandler {
     }
 
     /**
-     * Extracts cluster summaries from triage result: clusterName → summary.
+     * Extracts cluster summaries from triage result: compositeKey → summary.
+     * Uses "subPackage::clusterName" as key to avoid collisions between
+     * identically-named clusters (e.g. "Standalone Objects") across packages.
+     * Root-level clusters (empty subPackage) use just the cluster name.
      */
     private static Map<String, String> extractClusterSummariesFromTriage(String json) {
         Map<String, String> clusterSummaries = new HashMap<>();
@@ -721,8 +724,11 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             String objJson = json.substring(objStart, objEnd + 1);
             String name = extractSimpleField(objJson, "name");
             String summary = extractSimpleField(objJson, "summary");
+            String subPackage = extractSimpleField(objJson, "subPackage");
             if (name != null && !name.isEmpty()) {
-                clusterSummaries.put(name, summary != null ? summary : "");
+                String compositeKey = (subPackage != null && !subPackage.isEmpty())
+                    ? subPackage + "::" + name : name;
+                clusterSummaries.put(compositeKey, summary != null ? summary : "");
             }
 
             pos = objEnd + 1;
@@ -735,7 +741,9 @@ public class GeneratePackageDocHandler extends AbstractHandler {
     }
 
     /**
-     * Extracts cluster assignments from triage result: clusterName → objectNames[].
+     * Extracts cluster assignments from triage result: compositeKey → objectNames[].
+     * Uses "subPackage::clusterName" as key to avoid collisions between
+     * identically-named clusters across packages.
      */
     private static Map<String, String[]> extractClusterAssignmentsFromTriage(String json) {
         Map<String, String[]> assignments = new HashMap<>();
@@ -753,8 +761,11 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             String objJson = json.substring(objStart, objEnd + 1);
             String name = extractSimpleField(objJson, "name");
             String[] objectNames = extractStringArray(objJson, "objectNames");
+            String subPackage = extractSimpleField(objJson, "subPackage");
             if (name != null && !name.isEmpty() && objectNames.length > 0) {
-                assignments.put(name, objectNames);
+                String compositeKey = (subPackage != null && !subPackage.isEmpty())
+                    ? subPackage + "::" + name : name;
+                assignments.put(compositeKey, objectNames);
             }
 
             pos = objEnd + 1;
