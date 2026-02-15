@@ -439,6 +439,13 @@ function rebuildClustersFromAssignments(
     });
   }
 
+  // Ensure "Standalone Objects" comes after named clusters
+  clusters.sort((a, b) => {
+    if (a.name === "Standalone Objects") return 1;
+    if (b.name === "Standalone Objects") return -1;
+    return 0;
+  });
+
   return clusters;
 }
 
