@@ -1,4 +1,4 @@
-import { ADTClient, SearchResult, UsageReference } from "abap-adt-api";
+import { ADTClient, SearchResult, UsageReference, DdicElement } from "abap-adt-api";
 
 export class AdtClientWrapper {
   private client: ADTClient;
@@ -80,6 +80,43 @@ export class AdtClientWrapper {
       objectUri: node.OBJECT_URI ?? "",
       description: node.DESCRIPTION ?? "",
     }));
+  }
+
+  /**
+   * Fetches DDIC structure for objects without source code (TABL, VIEW, DTEL, etc.).
+   * Returns a text representation of the field structure.
+   */
+  async fetchDdicStructure(objectName: string): Promise<string | undefined> {
+    try {
+      const element: DdicElement = await this.client.ddicElement(objectName);
+      return this.formatDdicElement(element);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private formatDdicElement(element: DdicElement, indent = 0): string {
+    const lines: string[] = [];
+    const prefix = "  ".repeat(indent);
+    const props = element.properties?.elementProps;
+
+    let line = `${prefix}${element.name}`;
+    if (props) {
+      const parts: string[] = [];
+      if (props.ddicDataType) parts.push(props.ddicDataType);
+      if (props.ddicLength) parts.push(`length ${props.ddicLength}`);
+      if (props.ddicIsKey) parts.push("KEY");
+      if (props.ddicDataElement) parts.push(`DTEL: ${props.ddicDataElement}`);
+      if (parts.length > 0) line += ` (${parts.join(", ")})`;
+      const label = props.ddicLabelMedium || props.ddicLabelShort || props.ddicHeading;
+      if (label) line += ` — ${label}`;
+    }
+    lines.push(line);
+
+    for (const child of element.children ?? []) {
+      lines.push(this.formatDdicElement(child, indent + 1));
+    }
+    return lines.join("\n");
   }
 
   /**

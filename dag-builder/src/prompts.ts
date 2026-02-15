@@ -15,6 +15,7 @@ export function buildSummaryPrompt(
     "Summarize this ABAP object in 2-4 sentences. Be technical and specific — no filler.",
     "Focus on: what it does technically, key tables/APIs used, data flow, and integration points.",
     "Do NOT write generic phrases like 'serves as a central component' or 'facilitates the process'. State concrete technical facts.",
+    "Do NOT guess or speculate. Never use words like 'likely', 'probably', 'possibly'. Only state what you can confirm from the provided source/structure.",
     "The summary must be at least 30 words. Output plain text, no Markdown headers.",
   ].join(" ");
 
@@ -77,6 +78,7 @@ export function buildDocPrompt(
     "Do NOT write general introductory sentences like 'This class serves as...' or 'The primary purpose is to facilitate...'. Jump straight into what it does technically.",
     "Do NOT list every method or enumerate parameters. Describe the processing logic and important technical choices.",
     "Do NOT pad sections with obvious statements. If a section would only restate what's in the code, omit it entirely.",
+    "Do NOT guess or speculate. Never use words like 'likely', 'probably', 'possibly'. Only document what you can confirm from the source code.",
     "Use the dependency summaries to explain how the object interacts with its dependencies.",
     "",
     "## Output Structure",

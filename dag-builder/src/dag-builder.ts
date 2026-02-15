@@ -193,9 +193,13 @@ async function resolveType(
   return "CLAS";
 }
 
+/** Object types that don't have ABAP source but may have DDIC structure. */
+const DDIC_TYPES = new Set(["TABL", "VIEW", "DTEL", "DOMA", "TTYP", "TYPE", "STRU"]);
+
 /**
  * Fetches ABAP source for a list of DAG nodes via ADT.
- * Returns a map of node name → source code.
+ * For DDIC objects without source, tries to fetch field structure instead.
+ * Returns a map of node name → source code (or DDIC structure text).
  */
 export async function fetchSourceForNodes(
   client: AdtClientWrapper,
@@ -208,6 +212,16 @@ export async function fetchSourceForNodes(
       const source = await client.fetchSource(node.name);
       sources.set(node.name, source);
     } catch (err) {
+      // For DDIC objects, try fetching structure as fallback
+      if (DDIC_TYPES.has(node.type)) {
+        try {
+          const ddic = await client.fetchDdicStructure(node.name);
+          if (ddic) {
+            sources.set(node.name, `* DDIC ${node.type}: ${node.name}\n* Field structure:\n${ddic}`);
+            continue;
+          }
+        } catch { /* ignore DDIC fetch failure */ }
+      }
       errors.push(`Failed to fetch source for ${node.name}: ${String(err)}`);
     }
   }
