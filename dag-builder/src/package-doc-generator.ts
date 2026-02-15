@@ -225,10 +225,13 @@ async function processPackageObjects(
       const clusterConfig: LlmConfig = { ...input.summaryLlm, maxTokens: CLUSTER_SUMMARY_MAX_TOKENS };
       try {
         const response = await callLlm(clusterConfig, buildClusterSummaryPrompt(clusterObjectSummaries, cluster.internalEdges));
+        // Skip leading blank lines — some models prepend newlines
         const lines = response.content.split("\n");
-        const suggestedName = lines[0].trim();
+        const firstNonEmpty = lines.findIndex((l) => l.trim().length > 0);
+        const suggestedName = firstNonEmpty >= 0 ? lines[firstNonEmpty].trim() : "";
         cluster.name = suggestedName || `Cluster ${cluster.id + 1}`;
-        const summaryText = lines.slice(2).join("\n").trim();
+        const summaryLines = firstNonEmpty >= 0 ? lines.slice(firstNonEmpty + 1) : lines;
+        const summaryText = summaryLines.join("\n").trim();
         clusterSummaries[cluster.name] = summaryText || "[Summary unavailable]";
         clusterSummaryTokens += response.usage.promptTokens + response.usage.completionTokens;
         log(`  Cluster named: ${cluster.name}`);
