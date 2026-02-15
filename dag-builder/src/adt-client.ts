@@ -15,19 +15,51 @@ export class AdtClientWrapper {
     await this.client.logout();
   }
 
+  /** Known ADT URL patterns for DDIC object types. */
+  private static readonly DDIC_URL_MAP: Record<string, string> = {
+    TABL: "/sap/bc/adt/ddic/tables/",
+    VIEW: "/sap/bc/adt/ddic/views/",
+    DTEL: "/sap/bc/adt/ddic/dataelements/",
+    DOMA: "/sap/bc/adt/ddic/domains/",
+  };
+
   /**
    * Fetches the ABAP source code for a given object using the proper ADT pattern:
    * searchObject → objectStructure → mainInclude → getObjectSource
+   * For DDIC objects, falls back to direct URL patterns if search fails.
    */
-  async fetchSource(objectName: string): Promise<string> {
+  async fetchSource(objectName: string, objectType?: string): Promise<string> {
+    // Try standard search-based approach first
     const objectUrl = await this.resolveObjectUrl(objectName);
-    if (!objectUrl) {
-      throw new Error(`Resource ${objectName} not found via ADT search.`);
+    if (objectUrl) {
+      try {
+        const structure = await this.client.objectStructure(objectUrl);
+        const sourceUrl = ADTClient.mainInclude(structure);
+        return await this.client.getObjectSource(sourceUrl);
+      } catch {
+        // Standard approach failed — try DDIC direct URL below
+      }
     }
 
-    const structure = await this.client.objectStructure(objectUrl);
-    const sourceUrl = ADTClient.mainInclude(structure);
-    return this.client.getObjectSource(sourceUrl);
+    // For DDIC types, try known URL patterns directly
+    if (objectType) {
+      const basePath = AdtClientWrapper.DDIC_URL_MAP[objectType];
+      if (basePath) {
+        const name = objectName.toLowerCase();
+        // TABL/VIEW: source at /source/main
+        if (objectType === "TABL" || objectType === "VIEW") {
+          try {
+            return await this.client.getObjectSource(`${basePath}${name}/source/main`);
+          } catch { /* try object URL directly */ }
+        }
+        // DTEL/DOMA: read from object URL directly (returns XML)
+        try {
+          return await this.client.getObjectSource(`${basePath}${name}`);
+        } catch { /* fall through */ }
+      }
+    }
+
+    throw new Error(`Cannot fetch source for ${objectName}${objectType ? ` (${objectType})` : ""}`);
   }
 
   /**

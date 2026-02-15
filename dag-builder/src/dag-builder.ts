@@ -198,8 +198,9 @@ const DDIC_TYPES = new Set(["TABL", "VIEW", "DTEL", "DOMA", "TTYP", "TYPE", "STR
 
 /**
  * Fetches ABAP source for a list of DAG nodes via ADT.
- * For DDIC objects without source, tries to fetch field structure instead.
- * Returns a map of node name → source code (or DDIC structure text).
+ * For DDIC objects, passes type to enable direct URL fallbacks.
+ * As last resort, tries ddicElement for field structure.
+ * Returns a map of node name → source code (or DDIC definition).
  */
 export async function fetchSourceForNodes(
   client: AdtClientWrapper,
@@ -209,10 +210,10 @@ export async function fetchSourceForNodes(
   const sources = new Map<string, string>();
   for (const node of nodes) {
     try {
-      const source = await client.fetchSource(node.name);
+      const source = await client.fetchSource(node.name, node.type);
       sources.set(node.name, source);
     } catch (err) {
-      // For DDIC objects, try fetching structure as fallback
+      // For DDIC objects, try ddicElement as last resort
       if (DDIC_TYPES.has(node.type)) {
         try {
           const ddic = await client.fetchDdicStructure(node.name);
@@ -220,7 +221,7 @@ export async function fetchSourceForNodes(
             sources.set(node.name, `* DDIC ${node.type}: ${node.name}\n* Field structure:\n${ddic}`);
             continue;
           }
-        } catch { /* ignore DDIC fetch failure */ }
+        } catch { /* ignore */ }
       }
       errors.push(`Failed to fetch source for ${node.name}: ${String(err)}`);
     }
