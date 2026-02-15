@@ -267,6 +267,7 @@ export function buildIndexPage(
   objectDocs?: Record<string, string>,
   summaries?: Record<string, string>,
   objectLinkPrefix?: string,
+  parentPackageName?: string,
 ): string {
   const knownObjects = new Set<string>();
   for (const c of clusters) {
@@ -275,6 +276,9 @@ export function buildIndexPage(
   const linkPrefix = objectLinkPrefix ?? "";
 
   const parts: string[] = [];
+  if (parentPackageName) {
+    parts.push(`<nav class="breadcrumb"><a href="../index.html">${escapeHtml(parentPackageName)}</a><span class="sep">/</span>${escapeHtml(packageName)}</nav>`);
+  }
   parts.push(`<h1>Package ${escapeHtml(packageName)}</h1>`);
 
   // Table of Contents by cluster
@@ -299,12 +303,13 @@ export function buildIndexPage(
       parts.push(wrapDiagramHtml(clusterDiagram));
     }
 
-    // Object cards — all objects with full docs or summaries get preview cards
-    const linkedObjects = cluster.objects.filter((o) =>
-      objectDocs?.[o.name] || summaries?.[o.name],
-    );
+    // Object cards sorted by topological order (entry points first, foundational objects last)
+    const topoIndex = new Map(cluster.topologicalOrder.map((name, i) => [name, i]));
+    const linkedObjects = cluster.objects
+      .filter((o) => objectDocs?.[o.name] || summaries?.[o.name] || o.description)
+      .sort((a, b) => (topoIndex.get(b.name) ?? 0) - (topoIndex.get(a.name) ?? 0));
     for (const obj of linkedObjects) {
-      const summary = summaries?.[obj.name] ?? obj.description ?? "";
+      const summary = summaries?.[obj.name] || obj.description || "";
       parts.push(`<div class="obj-card">`);
       parts.push(
         `<div class="obj-header"><a href="${linkPrefix}${obj.name}.html">${escapeHtml(obj.name)}</a>`
@@ -666,10 +671,11 @@ export function assembleHierarchicalHtmlWiki(
       }
     }
 
-    // Sub-package index page
+    // Sub-package index page (with back link to root)
     pages[`${spDir}index.html`] = buildIndexPage(
       spName, sp.clusters, sp.clusterSummaries,
       sp.externalDeps, sp.objectDocs, sp.summaries,
+      undefined, packageName,
     );
   }
 
@@ -710,9 +716,12 @@ export function assembleHierarchicalHtmlWiki(
       );
       if (clusterDiagram) rootParts.push(wrapDiagramHtml(clusterDiagram));
 
-      const linkedObjects = cluster.objects.filter((o) => rootObjectDocs[o.name] || rootSummaries[o.name]);
+      const topoIndex = new Map(cluster.topologicalOrder.map((name, i) => [name, i]));
+      const linkedObjects = cluster.objects
+        .filter((o) => rootObjectDocs[o.name] || rootSummaries[o.name] || o.description)
+        .sort((a, b) => (topoIndex.get(b.name) ?? 0) - (topoIndex.get(a.name) ?? 0));
       for (const obj of linkedObjects) {
-        const summary = rootSummaries[obj.name] ?? "";
+        const summary = rootSummaries[obj.name] || obj.description || "";
         rootParts.push(`<div class="obj-card">`);
         rootParts.push(
           `<div class="obj-header"><a href="${obj.name}.html">${escapeHtml(obj.name)}</a>`

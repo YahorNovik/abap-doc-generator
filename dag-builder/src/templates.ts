@@ -8,7 +8,7 @@ export interface DocTemplate {
 // ─── Package-level token limits ───
 
 export const PACKAGE_OVERVIEW_MAX_TOKENS = 1024;
-export const CLUSTER_SUMMARY_MAX_TOKENS = 2048;
+export const CLUSTER_SUMMARY_MAX_TOKENS = 4096;
 
 // ─── Section builders by object type ───
 

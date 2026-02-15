@@ -47,6 +47,32 @@ interface ProcessOptions {
   precomputedClusterAssignments?: Record<string, string[]>;
 }
 
+/**
+ * Build a fallback cluster name from the object types when LLM fails.
+ * e.g., "CLAS/INTF Objects" or "CDS Views"
+ */
+function buildFallbackClusterName(objects: Array<{ name: string; type: string }>): string {
+  const typeCounts = new Map<string, number>();
+  for (const o of objects) {
+    typeCounts.set(o.type, (typeCounts.get(o.type) ?? 0) + 1);
+  }
+  const sorted = [...typeCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const topTypes = sorted.slice(0, 2).map(([t]) => t);
+  return `${topTypes.join("/")} Objects`;
+}
+
+/**
+ * Build a fallback cluster summary from object summaries when LLM fails.
+ */
+function buildFallbackClusterSummary(objects: Array<{ name: string; type: string; summary: string }>): string {
+  const lines = objects
+    .filter((o) => o.summary && o.summary !== "[Summary unavailable]")
+    .slice(0, 8)
+    .map((o) => `${o.name} (${o.type}): ${o.summary}`);
+  if (lines.length === 0) return `Contains ${objects.length} objects: ${objects.map((o) => o.name).join(", ")}.`;
+  return `Contains ${objects.length} objects:\n${lines.join("\n")}`;
+}
+
 /** Result of processing one (sub-)package's objects. */
 interface ProcessResult {
   clusters: Cluster[];
@@ -102,10 +128,6 @@ async function processPackageObjects(
   if (hasClusterAssignments) {
     log(`[${packageLabel}] Using precomputed cluster assignments...`);
     clusters = rebuildClustersFromAssignments(objects, graph, options!.precomputedClusterAssignments!);
-    // Restore cluster names from precomputed summaries
-    for (const cluster of clusters) {
-      if (clusterSummaries[cluster.name]) continue;
-    }
     log(`[${packageLabel}] Restored ${clusters.length} cluster(s) from precomputed assignments.`);
   } else {
     log(`[${packageLabel}] Detecting functional clusters...`);
@@ -143,14 +165,15 @@ async function processPackageObjects(
           const obj = objectMap.get(name);
           if (!obj) continue;
           const source = sources.get(name);
-          if (!source) { errors.push(`No source for ${name}, skipping.`); continue; }
           const edges = edgesByFrom.get(name) ?? [];
           const depSums = edges.filter((e) => summaries[e.to]).map((e) => ({ name: e.to, summary: summaries[e.to] }));
           const dagNode: DagNode = {
-            name, type: obj.type, isCustom: true, sourceAvailable: true,
+            name, type: obj.type, isCustom: true, sourceAvailable: !!source,
             usedBy: cluster.internalEdges.filter((e) => e.to === name).map((e) => e.from),
           };
-          callSpecs.push({ name, messages: buildSummaryPrompt(dagNode, source, depSums) });
+          // For DDIC objects without source, use description as pseudo-source
+          const effectiveSource = source || `* ${obj.type} object: ${name}\n* Description: ${obj.description || "No description available"}`;
+          callSpecs.push({ name, messages: buildSummaryPrompt(dagNode, effectiveSource, depSums) });
         }
         if (callSpecs.length === 0) continue;
         log(`  Level ${level}: ${callSpecs.length} node(s) — summarizing in parallel...`);
@@ -163,11 +186,18 @@ async function processPackageObjects(
           const result = results[i];
           const name = callSpecs[i].name;
           if (result.status === "fulfilled") {
-            summaries[name] = result.value.content;
+            const rawContent = result.value.content;
+            const rawLen = rawContent?.length ?? 0;
+            summaries[name] = rawContent || objectMap.get(name)?.description || "[Summary unavailable]";
             summaryTokens += result.value.usage.promptTokens + result.value.usage.completionTokens;
-            log(`  Summarized ${name}`);
+            if (!rawContent) {
+              log(`  WARNING: LLM returned empty summary for ${name} — using fallback (${summaries[name].length} chars)`);
+            } else {
+              log(`  Summarized ${name}: LLM returned ${rawLen} chars, stored ${summaries[name].length} chars`);
+            }
           } else {
             summaries[name] = objectMap.get(name)?.description || "[Summary unavailable]";
+            log(`  ERROR: Summary for ${name} failed: ${String(result.reason)} — using fallback (${summaries[name].length} chars)`);
             errors.push(`Summary for ${name} failed: ${String(result.reason)}`);
           }
         }
@@ -193,7 +223,7 @@ async function processPackageObjects(
           const srcLines = (sources.get(o.name) ?? "").split("\n").length;
           const depCount = (edgesByFrom.get(o.name) ?? []).length;
           const usedByCount = cluster.internalEdges.filter((e) => e.to === o.name).length;
-          return { name: o.name, type: o.type, summary: summaries[o.name] ?? o.description, sourceLines: srcLines, depCount, usedByCount };
+          return { name: o.name, type: o.type, summary: summaries[o.name] || o.description || "", sourceLines: srcLines, depCount, usedByCount };
         });
       try {
         const triageResponse = await callLlm(input.summaryLlm, buildTriagePrompt(triageInput));
@@ -219,7 +249,7 @@ async function processPackageObjects(
       triageMetadata.push({
         name: obj.name,
         type: obj.type,
-        summary: summaries[obj.name] ?? (obj.description || "[Summary unavailable]"),
+        summary: summaries[obj.name] || obj.description || "[Summary unavailable]",
         sourceLines: srcLines,
         depCount,
         usedByCount,
@@ -238,10 +268,11 @@ async function processPackageObjects(
           continue;
         }
         const source = sources.get(obj.name);
-        if (!source) continue;
+        // For DDIC objects without source, use description as pseudo-source
+        const effectiveSource = source || `* ${obj.type} object: ${obj.name}\n* Description: ${obj.description || "No description available"}`;
 
         const dagNode: DagNode = {
-          name: obj.name, type: obj.type, isCustom: true, sourceAvailable: true,
+          name: obj.name, type: obj.type, isCustom: true, sourceAvailable: !!source,
           usedBy: cluster.internalEdges.filter((e) => e.to === obj.name).map((e) => e.from),
         };
         const edges = edgesByFrom.get(obj.name) ?? [];
@@ -255,7 +286,7 @@ async function processPackageObjects(
 
         const template = resolveTemplate(input.templateType, input.templateCustom, obj.type);
         const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
-        const docMessages = buildDocPrompt(dagNode, source, depDetails, template, internalWhereUsed, input.userContext);
+        const docMessages = buildDocPrompt(dagNode, effectiveSource, depDetails, template, internalWhereUsed, input.userContext);
 
         const toolExecutor = async (tc: ToolCall): Promise<string> => {
           switch (tc.name) {
@@ -288,32 +319,44 @@ async function processPackageObjects(
     if (!hasClusterSummaries) {
       if (cluster.name !== "Standalone Objects" && cluster.objects.length > 1) {
         const clusterObjectSummaries = cluster.objects.map((o) => ({
-          name: o.name, type: o.type, summary: summaries[o.name] ?? o.description,
+          name: o.name, type: o.type, summary: summaries[o.name] ?? (o.description || "[Summary unavailable]"),
         }));
         const clusterConfig: LlmConfig = { ...input.summaryLlm, maxTokens: CLUSTER_SUMMARY_MAX_TOKENS };
+        log(`  Generating cluster summary for ${cluster.objects.length} objects (provider: ${input.summaryLlm.provider}, model: ${input.summaryLlm.model})...`);
         try {
           const response = await callLlm(clusterConfig, buildClusterSummaryPrompt(clusterObjectSummaries, cluster.internalEdges));
-          // Skip leading blank lines — some models prepend newlines
-          const lines = response.content.split("\n");
-          const firstNonEmpty = lines.findIndex((l) => l.trim().length > 0);
-          const suggestedName = firstNonEmpty >= 0 ? lines[firstNonEmpty].trim() : "";
-          cluster.name = suggestedName || `Cluster ${cluster.id + 1}`;
-          const summaryLines = firstNonEmpty >= 0 ? lines.slice(firstNonEmpty + 1) : lines;
-          const summaryText = summaryLines.join("\n").trim();
-          clusterSummaries[cluster.name] = summaryText || "[Summary unavailable]";
+          log(`  Cluster summary LLM response: ${response.content.length} chars, ${response.usage.promptTokens}+${response.usage.completionTokens} tokens`);
+          if (!response.content || response.content.trim().length === 0) {
+            log(`  WARNING: LLM returned empty cluster summary — using fallback`);
+            cluster.name = buildFallbackClusterName(clusterObjectSummaries) || `Cluster ${cluster.id + 1}`;
+            clusterSummaries[cluster.name] = buildFallbackClusterSummary(clusterObjectSummaries);
+          } else {
+            // Skip leading blank lines — some models prepend newlines
+            const lines = response.content.split("\n");
+            const firstNonEmpty = lines.findIndex((l) => l.trim().length > 0);
+            const suggestedName = firstNonEmpty >= 0 ? lines[firstNonEmpty].trim() : "";
+            cluster.name = suggestedName || buildFallbackClusterName(clusterObjectSummaries) || `Cluster ${cluster.id + 1}`;
+            const summaryLines = firstNonEmpty >= 0 ? lines.slice(firstNonEmpty + 1) : lines;
+            const summaryText = summaryLines.join("\n").trim();
+            clusterSummaries[cluster.name] = summaryText || buildFallbackClusterSummary(clusterObjectSummaries);
+          }
           clusterSummaryTokens += response.usage.promptTokens + response.usage.completionTokens;
           log(`  Cluster named: ${cluster.name}`);
         } catch (err) {
-          cluster.name = `Cluster ${cluster.id + 1}`;
-          clusterSummaries[cluster.name] = "[Summary unavailable]";
+          log(`  ERROR: Cluster summary LLM call failed: ${String(err)}`);
+          // Fallback: name from primary object types, summary from object list
+          cluster.name = buildFallbackClusterName(clusterObjectSummaries) || `Cluster ${cluster.id + 1}`;
+          clusterSummaries[cluster.name] = buildFallbackClusterSummary(clusterObjectSummaries);
           errors.push(`Failed to summarize cluster ${cluster.id}: ${String(err)}`);
         }
       } else if (cluster.name === "Standalone Objects") {
         clusterSummaries[cluster.name] = "Objects with no internal package dependencies.";
+        log(`  Standalone cluster: ${cluster.objects.length} object(s)`);
       } else if (cluster.objects.length === 1) {
         const obj = cluster.objects[0];
         cluster.name = obj.name;
-        clusterSummaries[cluster.name] = summaries[obj.name] ?? obj.description;
+        clusterSummaries[cluster.name] = summaries[obj.name] || obj.description || "";
+        log(`  Single-object cluster: ${obj.name} — summary ${clusterSummaries[cluster.name].length} chars`);
       }
     }
 
@@ -323,6 +366,20 @@ async function processPackageObjects(
         meta.clusterName = cluster.name;
       }
     }
+  }
+
+  // Log final state summary
+  const summaryCount = Object.values(summaries).filter((s) => s && s.length > 0).length;
+  const emptySummaries = Object.entries(summaries).filter(([, s]) => !s || s.length === 0).map(([k]) => k);
+  const docCount = Object.values(objectDocs).filter((d) => d && d.length > 0).length;
+  const clusterSumCount = Object.values(clusterSummaries).filter((s) => s && s.length > 0).length;
+  log(`[${packageLabel}] Final state: ${summaryCount} summaries, ${docCount} docs, ${clusterSumCount} cluster summaries, ${clusters.length} clusters`);
+  if (emptySummaries.length > 0) {
+    log(`[${packageLabel}] WARNING: Objects with empty summaries: ${emptySummaries.join(", ")}`);
+  }
+  for (const cluster of clusters) {
+    const cs = clusterSummaries[cluster.name];
+    log(`[${packageLabel}]   Cluster "${cluster.name}": summary ${cs ? cs.length : 0} chars, ${cluster.objects.length} objects`);
   }
 
   return { clusters, graph, summaries, objectDocs, clusterSummaries, tokenUsage: { summaryTokens, objectDocTokens, clusterSummaryTokens }, triageMetadata };
@@ -444,7 +501,7 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
       for (const cluster of result.clusters) {
         allClusters.push({
           name: cluster.name,
-          summary: result.clusterSummaries[cluster.name] ?? "",
+          summary: result.clusterSummaries[cluster.name] || "",
           objectNames: cluster.objects.map((o) => o.name),
           subPackage: "",
         });
@@ -465,7 +522,7 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
       for (const cluster of result.clusters) {
         allClusters.push({
           name: cluster.name,
-          summary: result.clusterSummaries[cluster.name] ?? "",
+          summary: result.clusterSummaries[cluster.name] || "",
           objectNames: cluster.objects.map((o) => o.name),
           subPackage: spNode.name,
         });

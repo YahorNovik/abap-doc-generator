@@ -82,8 +82,16 @@ async function callGemini(
   }
 
   const json: any = await res.json();
-  const content = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  const candidate = json.candidates?.[0];
+  const content = candidate?.content?.parts?.[0]?.text ?? "";
   const usage = json.usageMetadata ?? {};
+
+  // Log when Gemini returns empty/blocked content
+  if (!content) {
+    const finishReason = candidate?.finishReason ?? "NO_CANDIDATES";
+    const blockReason = json.promptFeedback?.blockReason;
+    log(`WARNING: Gemini returned empty content (finishReason: ${finishReason}${blockReason ? `, blockReason: ${blockReason}` : ""})`);
+  }
 
   return {
     content,
@@ -136,8 +144,15 @@ async function callOpenAI(
   }
 
   const json: any = await res.json();
-  const content = json.choices?.[0]?.message?.content ?? "";
+  const choice = json.choices?.[0];
+  const content = choice?.message?.content ?? "";
   const usage = json.usage ?? {};
+
+  // Log when OpenAI returns empty content
+  if (!content) {
+    const finishReason = choice?.finish_reason ?? "NO_CHOICES";
+    log(`WARNING: OpenAI returned empty content (finish_reason: ${finishReason})`);
+  }
 
   return {
     content,

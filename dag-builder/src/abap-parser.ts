@@ -123,7 +123,7 @@ function processReference(
     const ooName = ref.extra?.ooName;
     if (!ooName || ooName.toUpperCase() === selfName.toUpperCase()) return;
 
-    getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? inferTypeFromName(ooName));
+    getOrCreateDep(depMap, ooName, resolveOoType(ref.extra?.ooType, ooName));
     return;
   }
 
@@ -132,7 +132,7 @@ function processReference(
     const ooName = ref.extra?.ooName;
     if (!ooName || ooName.toUpperCase() === selfName.toUpperCase()) return;
 
-    const dep = getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? inferTypeFromName(ooName));
+    const dep = getOrCreateDep(depMap, ooName, resolveOoType(ref.extra?.ooType, ooName));
     const memberName = ref.position.getName();
     if (memberName && !dep.members.some((m) => m.memberName === memberName && m.memberType === "method")) {
       dep.members.push({
@@ -149,7 +149,7 @@ function processReference(
     const ooName = ref.extra?.ooName;
     if (!ooName || ooName.toUpperCase() === selfName.toUpperCase()) return;
 
-    const dep = getOrCreateDep(depMap, ooName, ref.extra?.ooType ?? inferTypeFromName(ooName));
+    const dep = getOrCreateDep(depMap, ooName, resolveOoType(ref.extra?.ooType, ooName));
     if (!dep.members.some((m) => m.memberType === "constructor")) {
       dep.members.push({
         memberName: "CONSTRUCTOR",
@@ -256,6 +256,12 @@ function collectAstReferences(
 }
 
 // ─── Helpers ───
+
+/** Resolve OO type: use abaplint's type if concrete, otherwise infer from name. */
+function resolveOoType(ooType: string | undefined, name: string): string {
+  if (ooType && ooType !== "Void") return ooType;
+  return inferTypeFromName(name);
+}
 
 function inferTypeFromName(name: string): string {
   const upper = name.toUpperCase();
