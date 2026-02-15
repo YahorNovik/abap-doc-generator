@@ -71,10 +71,10 @@ export function buildDocPrompt(
 
   const system = [
     `You are an ABAP documentation expert. You are documenting an ${objectTypeLabel}: ${rootNode.name}.`,
-    "This is internal documentation for developers already familiar with the codebase.",
-    "Be CONCISE and SPECIFIC. Every sentence must add value — if a developer can see it in the code, do not restate it.",
-    "Write functional, business-oriented documentation. Focus on WHAT the object does and WHY, not on technical signatures.",
-    "Do NOT list every method, table, or field. Do NOT enumerate parameters or return types. Instead, describe the business logic at a high level.",
+    "This is TECHNICAL documentation for ABAP developers. Be direct and specific — no filler, no general statements.",
+    "Focus on concrete technical details: algorithms, data flow, key tables, integration points, non-obvious design decisions.",
+    "Do NOT write general introductory sentences like 'This class serves as...' or 'The primary purpose is to facilitate...'. Jump straight into what it does technically.",
+    "Do NOT list every method or enumerate parameters. Describe the processing logic and important technical choices.",
     "Do NOT pad sections with obvious statements. If a section would only restate what's in the code, omit it entirely.",
     "Use the dependency summaries to explain how the object interacts with its dependencies.",
     "",
