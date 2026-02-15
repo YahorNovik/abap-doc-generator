@@ -110,12 +110,9 @@ async function processPackageObjects(
   const hasClusterSummaries = !!options?.precomputedClusterSummaries;
   const hasClusterAssignments = !!options?.precomputedClusterAssignments;
 
-  // Fetch source for all objects
+  // Fetch source for all objects (pass URI from package contents for direct access)
   log(`[${packageLabel}] Fetching source code for ${objects.length} objects...`);
-  const dagNodes: DagNode[] = objects.map((o) => ({
-    name: o.name, type: o.type, isCustom: true, sourceAvailable: true, usedBy: [],
-  }));
-  const sources = await fetchSourceForNodes(client, dagNodes, errors);
+  const sources = await fetchSourceForNodes(client, objects, errors);
   log(`[${packageLabel}] Fetched source for ${sources.size}/${objects.length} objects.`);
 
   // Build package-internal graph

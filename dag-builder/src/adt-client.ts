@@ -1,4 +1,4 @@
-import { ADTClient, SearchResult, UsageReference, DdicElement } from "abap-adt-api";
+import { ADTClient, SearchResult, UsageReference } from "abap-adt-api";
 
 export class AdtClientWrapper {
   private client: ADTClient;
@@ -15,51 +15,30 @@ export class AdtClientWrapper {
     await this.client.logout();
   }
 
-  /** Known ADT URL patterns for DDIC object types. */
-  private static readonly DDIC_URL_MAP: Record<string, string> = {
-    TABL: "/sap/bc/adt/ddic/tables/",
-    VIEW: "/sap/bc/adt/ddic/views/",
-    DTEL: "/sap/bc/adt/ddic/dataelements/",
-    DOMA: "/sap/bc/adt/ddic/domains/",
-  };
+  /**
+   * Resolves the ADT URL for an object. Uses objectUri if provided (from package contents),
+   * otherwise falls back to searchObject.
+   */
+  private async resolveUrl(objectName: string, objectUri?: string): Promise<string> {
+    if (objectUri) return objectUri;
+    const url = await this.resolveObjectUrl(objectName);
+    if (!url) throw new Error(`Resource ${objectName} not found via ADT search.`);
+    return url;
+  }
 
   /**
-   * Fetches the ABAP source code for a given object using the proper ADT pattern:
-   * searchObject → objectStructure → mainInclude → getObjectSource
-   * For DDIC objects, falls back to direct URL patterns if search fails.
+   * Fetches object source/definition via ADT:
+   * objectStructure → mainInclude → getObjectSource
+   *
+   * Works for all types: CLAS, PROG, TABL, VIEW, DTEL, etc.
+   * For DDIC objects this returns XML definition; for code objects, ABAP source.
+   * Pass objectUri (from getPackageContents) to skip the search step.
    */
-  async fetchSource(objectName: string, objectType?: string): Promise<string> {
-    // Try standard search-based approach first
-    const objectUrl = await this.resolveObjectUrl(objectName);
-    if (objectUrl) {
-      try {
-        const structure = await this.client.objectStructure(objectUrl);
-        const sourceUrl = ADTClient.mainInclude(structure);
-        return await this.client.getObjectSource(sourceUrl);
-      } catch {
-        // Standard approach failed — try DDIC direct URL below
-      }
-    }
-
-    // For DDIC types, try known URL patterns directly
-    if (objectType) {
-      const basePath = AdtClientWrapper.DDIC_URL_MAP[objectType];
-      if (basePath) {
-        const name = objectName.toLowerCase();
-        // TABL/VIEW: source at /source/main
-        if (objectType === "TABL" || objectType === "VIEW") {
-          try {
-            return await this.client.getObjectSource(`${basePath}${name}/source/main`);
-          } catch { /* try object URL directly */ }
-        }
-        // DTEL/DOMA: read from object URL directly (returns XML)
-        try {
-          return await this.client.getObjectSource(`${basePath}${name}`);
-        } catch { /* fall through */ }
-      }
-    }
-
-    throw new Error(`Cannot fetch source for ${objectName}${objectType ? ` (${objectType})` : ""}`);
+  async fetchSource(objectName: string, objectUri?: string): Promise<string> {
+    const objectUrl = await this.resolveUrl(objectName, objectUri);
+    const structure = await this.client.objectStructure(objectUrl);
+    const sourceUrl = ADTClient.mainInclude(structure);
+    return this.client.getObjectSource(sourceUrl);
   }
 
   /**
@@ -112,43 +91,6 @@ export class AdtClientWrapper {
       objectUri: node.OBJECT_URI ?? "",
       description: node.DESCRIPTION ?? "",
     }));
-  }
-
-  /**
-   * Fetches DDIC structure for objects without source code (TABL, VIEW, DTEL, etc.).
-   * Returns a text representation of the field structure.
-   */
-  async fetchDdicStructure(objectName: string): Promise<string | undefined> {
-    try {
-      const element: DdicElement = await this.client.ddicElement(objectName);
-      return this.formatDdicElement(element);
-    } catch {
-      return undefined;
-    }
-  }
-
-  private formatDdicElement(element: DdicElement, indent = 0): string {
-    const lines: string[] = [];
-    const prefix = "  ".repeat(indent);
-    const props = element.properties?.elementProps;
-
-    let line = `${prefix}${element.name}`;
-    if (props) {
-      const parts: string[] = [];
-      if (props.ddicDataType) parts.push(props.ddicDataType);
-      if (props.ddicLength) parts.push(`length ${props.ddicLength}`);
-      if (props.ddicIsKey) parts.push("KEY");
-      if (props.ddicDataElement) parts.push(`DTEL: ${props.ddicDataElement}`);
-      if (parts.length > 0) line += ` (${parts.join(", ")})`;
-      const label = props.ddicLabelMedium || props.ddicLabelShort || props.ddicHeading;
-      if (label) line += ` — ${label}`;
-    }
-    lines.push(line);
-
-    for (const child of element.children ?? []) {
-      lines.push(this.formatDdicElement(child, indent + 1));
-    }
-    return lines.join("\n");
   }
 
   /**

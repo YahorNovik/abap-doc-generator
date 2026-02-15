@@ -193,36 +193,22 @@ async function resolveType(
   return "CLAS";
 }
 
-/** Object types that don't have ABAP source but may have DDIC structure. */
-const DDIC_TYPES = new Set(["TABL", "VIEW", "DTEL", "DOMA", "TTYP", "TYPE", "STRU"]);
-
 /**
- * Fetches ABAP source for a list of DAG nodes via ADT.
- * For DDIC objects, passes type to enable direct URL fallbacks.
- * As last resort, tries ddicElement for field structure.
- * Returns a map of node name → source code (or DDIC definition).
+ * Fetches source/definition for a list of objects via ADT.
+ * Uses objectUri (from package contents) for direct access — no search needed.
+ * Works for all types: CLAS/PROG return ABAP source, TABL/VIEW/DTEL return XML definition.
  */
 export async function fetchSourceForNodes(
   client: AdtClientWrapper,
-  nodes: DagNode[],
+  nodes: Array<{ name: string; type: string; uri?: string }>,
   errors: string[],
 ): Promise<Map<string, string>> {
   const sources = new Map<string, string>();
   for (const node of nodes) {
     try {
-      const source = await client.fetchSource(node.name, node.type);
+      const source = await client.fetchSource(node.name, node.uri);
       sources.set(node.name, source);
     } catch (err) {
-      // For DDIC objects, try ddicElement as last resort
-      if (DDIC_TYPES.has(node.type)) {
-        try {
-          const ddic = await client.fetchDdicStructure(node.name);
-          if (ddic) {
-            sources.set(node.name, `* DDIC ${node.type}: ${node.name}\n* Field structure:\n${ddic}`);
-            continue;
-          }
-        } catch { /* ignore */ }
-      }
       errors.push(`Failed to fetch source for ${node.name}: ${String(err)}`);
     }
   }
