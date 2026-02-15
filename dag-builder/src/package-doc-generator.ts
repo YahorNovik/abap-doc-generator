@@ -242,8 +242,7 @@ async function processPackageObjects(
 
     // Collect triage metadata (for triage-only mode or always — cheap to compute)
     for (const obj of triageCandidates) {
-      if (!sources.has(obj.name)) continue;
-      const srcLines = (sources.get(obj.name) ?? "").split("\n").length;
+      const srcLines = sources.has(obj.name) ? (sources.get(obj.name) ?? "").split("\n").length : 0;
       const depCount = (edgesByFrom.get(obj.name) ?? []).length;
       const usedByCount = cluster.internalEdges.filter((e) => e.to === obj.name).length;
       triageMetadata.push({
@@ -802,7 +801,35 @@ function assembleHierarchicalDocument(
 
   parts.push(`# Package ${packageName}`);
 
-  // Sub-package sections
+  // Root-level clusters first
+  if (rootClusters.length > 0 && rootClusters.some((c) => c.objects.length > 0)) {
+    for (const cluster of rootClusters) {
+      parts.push("");
+      parts.push("---");
+      parts.push("");
+      parts.push(`## ${cluster.name}`);
+      parts.push("");
+      if (rootClusterSummaries[cluster.name]) {
+        parts.push(rootClusterSummaries[cluster.name]);
+      }
+
+      for (const obj of cluster.objects) {
+        const doc = rootObjectDocs[obj.name];
+        if (doc) {
+          parts.push("");
+          const shiftedDoc = doc.replace(/^# /gm, "#### ").replace(/^## /gm, "##### ");
+          parts.push(shiftedDoc);
+        } else if (rootSummaries[obj.name]) {
+          parts.push("");
+          parts.push(`#### ${obj.name} (${obj.type})`);
+          parts.push("");
+          parts.push(`> ${rootSummaries[obj.name]}`);
+        }
+      }
+    }
+  }
+
+  // Sub-package sections after root
   for (const sp of subPackages) {
     parts.push("");
     parts.push("---");
@@ -828,39 +855,6 @@ function assembleHierarchicalDocument(
           parts.push(`#### ${obj.name} (${obj.type})`);
           parts.push("");
           parts.push(`> ${sp.summaries[obj.name]}`);
-        }
-      }
-    }
-  }
-
-  // Root-level clusters
-  if (rootClusters.length > 0 && rootClusters.some((c) => c.objects.length > 0)) {
-    if (subPackages.length > 0) {
-      parts.push("");
-      parts.push("---");
-      parts.push("");
-      parts.push("## Root Package Objects");
-    }
-
-    for (const cluster of rootClusters) {
-      parts.push("");
-      parts.push(`### ${cluster.name}`);
-      parts.push("");
-      if (rootClusterSummaries[cluster.name]) {
-        parts.push(rootClusterSummaries[cluster.name]);
-      }
-
-      for (const obj of cluster.objects) {
-        const doc = rootObjectDocs[obj.name];
-        if (doc) {
-          parts.push("");
-          const shiftedDoc = doc.replace(/^# /gm, "#### ").replace(/^## /gm, "##### ");
-          parts.push(shiftedDoc);
-        } else if (rootSummaries[obj.name]) {
-          parts.push("");
-          parts.push(`#### ${obj.name} (${obj.type})`);
-          parts.push("");
-          parts.push(`> ${rootSummaries[obj.name]}`);
         }
       }
     }

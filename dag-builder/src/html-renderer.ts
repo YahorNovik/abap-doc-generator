@@ -683,31 +683,12 @@ export function assembleHierarchicalHtmlWiki(
   const rootParts: string[] = [];
   rootParts.push(`<h1>Package ${escapeHtml(packageName)}</h1>`);
 
-  // Sub-package navigation
-  if (subPackages.length > 0) {
-    rootParts.push(`<h2>Sub-Packages</h2>`);
-    rootParts.push(`<div class="toc"><ul>`);
-    for (const sp of subPackages) {
-      const objCount = sp.clusters.reduce((n, c) => n + c.objects.length, 0);
-      rootParts.push(
-        `<li><a href="${sp.node.name}/index.html"><strong>${escapeHtml(sp.node.name)}</strong></a>`
-        + ` (${objCount} objects)`
-        + (sp.node.description ? ` <span class="obj-desc">— ${escapeHtml(sp.node.description)}</span>` : "")
-        + `</li>`,
-      );
-    }
-    rootParts.push(`</ul></div>`);
-  }
-
-  // Root-level clusters (objects directly in root package)
+  // Root-level clusters first (objects directly in root package)
   if (rootClusters.length > 0 && rootClusters.some((c) => c.objects.length > 0)) {
-    if (subPackages.length > 0) {
-      rootParts.push(`<h2>Root Package Objects</h2>`);
-    }
     for (const cluster of rootClusters) {
       const clusterId = slugify(cluster.name);
       rootParts.push(`<div class="cluster-section">`);
-      rootParts.push(`<h3 id="${clusterId}">${escapeHtml(cluster.name)}</h3>`);
+      rootParts.push(`<h2 id="${clusterId}">${escapeHtml(cluster.name)}</h2>`);
       const summary = rootClusterSummaries[cluster.name];
       if (summary) rootParts.push(markdownToHtml(summary));
 
@@ -734,6 +715,22 @@ export function assembleHierarchicalHtmlWiki(
       }
       rootParts.push(`</div>`);
     }
+  }
+
+  // Sub-packages after root objects
+  if (subPackages.length > 0) {
+    rootParts.push(`<h2>Sub-Packages</h2>`);
+    rootParts.push(`<div class="toc"><ul>`);
+    for (const sp of subPackages) {
+      const objCount = sp.clusters.reduce((n, c) => n + c.objects.length, 0);
+      rootParts.push(
+        `<li><a href="${sp.node.name}/index.html"><strong>${escapeHtml(sp.node.name)}</strong></a>`
+        + ` (${objCount} objects)`
+        + (sp.node.description ? ` <span class="obj-desc">— ${escapeHtml(sp.node.description)}</span>` : "")
+        + `</li>`,
+      );
+    }
+    rootParts.push(`</ul></div>`);
   }
 
   // External deps (collapsed)
@@ -767,7 +764,35 @@ export function renderHierarchicalFullPageHtml(
   const parts: string[] = [];
   parts.push(`<h1>Package ${escapeHtml(packageName)}</h1>`);
 
-  // Sub-package sections
+  // Root-level clusters first
+  if (rootClusters.length > 0 && rootClusters.some((c) => c.objects.length > 0)) {
+    for (const cluster of rootClusters) {
+      const clusterId = slugify(cluster.name);
+      parts.push(`<h2 id="${clusterId}">${escapeHtml(cluster.name)}</h2>`);
+      const summary = rootClusterSummaries[cluster.name];
+      if (summary) parts.push(markdownToHtml(summary));
+
+      const clusterDiagram = buildMermaidDiagram(cluster.objects, cluster.internalEdges);
+      if (clusterDiagram) parts.push(wrapDiagramHtml(clusterDiagram));
+
+      for (const obj of cluster.objects) {
+        const md = rootObjectDocs[obj.name];
+        if (md) {
+          const shifted = md.replace(/^# /gm, "#### ").replace(/^## /gm, "##### ");
+          let objHtml = markdownToHtml(shifted);
+          objHtml = `<div id="${escapeHtml(obj.name)}">\n${objHtml}\n</div>`;
+          objHtml = linkifyAnchors(objHtml, knownObjects, obj.name);
+          parts.push(objHtml);
+        } else if (rootSummaries[obj.name]) {
+          parts.push(`<div id="${escapeHtml(obj.name)}">`);
+          parts.push(renderSummaryCard(obj, rootSummaries[obj.name]));
+          parts.push(`</div>`);
+        }
+      }
+    }
+  }
+
+  // Sub-package sections after root
   for (const sp of subPackages) {
     const spId = slugify(sp.node.name);
     parts.push(`<hr>`);
@@ -799,38 +824,6 @@ export function renderHierarchicalFullPageHtml(
       }
     }
     parts.push(`</div>`);
-  }
-
-  // Root-level clusters
-  if (rootClusters.length > 0 && rootClusters.some((c) => c.objects.length > 0)) {
-    if (subPackages.length > 0) {
-      parts.push(`<hr>`);
-      parts.push(`<h2 id="root-objects">Root Package Objects</h2>`);
-    }
-    for (const cluster of rootClusters) {
-      const clusterId = slugify(cluster.name);
-      parts.push(`<h3 id="${clusterId}">${escapeHtml(cluster.name)}</h3>`);
-      const summary = rootClusterSummaries[cluster.name];
-      if (summary) parts.push(markdownToHtml(summary));
-
-      const clusterDiagram = buildMermaidDiagram(cluster.objects, cluster.internalEdges);
-      if (clusterDiagram) parts.push(wrapDiagramHtml(clusterDiagram));
-
-      for (const obj of cluster.objects) {
-        const md = rootObjectDocs[obj.name];
-        if (md) {
-          const shifted = md.replace(/^# /gm, "#### ").replace(/^## /gm, "##### ");
-          let objHtml = markdownToHtml(shifted);
-          objHtml = `<div id="${escapeHtml(obj.name)}">\n${objHtml}\n</div>`;
-          objHtml = linkifyAnchors(objHtml, knownObjects, obj.name);
-          parts.push(objHtml);
-        } else if (rootSummaries[obj.name]) {
-          parts.push(`<div id="${escapeHtml(obj.name)}">`);
-          parts.push(renderSummaryCard(obj, rootSummaries[obj.name]));
-          parts.push(`</div>`);
-        }
-      }
-    }
   }
 
   return wrapHtmlPage(`Package ${packageName}`, parts.join("\n"));
