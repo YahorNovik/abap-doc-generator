@@ -11,9 +11,10 @@ export function buildSummaryPrompt(
   depSummaries: Array<{ name: string; summary: string }>,
 ): LlmMessage[] {
   const system = [
-    "You are an ABAP documentation assistant.",
-    "Summarize this ABAP object in 2-4 sentences.",
-    "Focus on: purpose, key capabilities, and business behavior.",
+    "You are an ABAP documentation assistant writing for ABAP developers.",
+    "Summarize this ABAP object in 2-4 sentences. Be technical and specific — no filler.",
+    "Focus on: what it does technically, key tables/APIs used, data flow, and integration points.",
+    "Do NOT write generic phrases like 'serves as a central component' or 'facilitates the process'. State concrete technical facts.",
     "The summary must be at least 30 words. Output plain text, no Markdown headers.",
   ].join(" ");
 
