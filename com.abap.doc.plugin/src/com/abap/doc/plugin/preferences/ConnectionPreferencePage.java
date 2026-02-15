@@ -42,13 +42,6 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
     // Sub-package depth
     public static final String PREF_MAX_SUBPACKAGE_DEPTH = "maxSubPackageDepth";
 
-    // Confluence
-    public static final String PREF_CONFLUENCE_URL = "confluenceUrl";
-    public static final String PREF_CONFLUENCE_SPACE = "confluenceSpace";
-    public static final String PREF_CONFLUENCE_PARENT_ID = "confluenceParentId";
-    public static final String PREF_CONFLUENCE_USERNAME = "confluenceUsername";
-    public static final String PREF_CONFLUENCE_TOKEN = "confluenceToken";
-
     private static final String[][] PROVIDER_OPTIONS = {
         { "Gemini", "gemini" },
         { "OpenAI", "openai" },
@@ -124,13 +117,6 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
 
         // Save location
         addField(new StringFieldEditor(PREF_SAVE_PATH, "Default Save Directory:", getFieldEditorParent()));
-
-        // Confluence
-        addField(new StringFieldEditor(PREF_CONFLUENCE_URL, "Confluence URL:", getFieldEditorParent()));
-        addField(new StringFieldEditor(PREF_CONFLUENCE_SPACE, "Confluence Space Key:", getFieldEditorParent()));
-        addField(new StringFieldEditor(PREF_CONFLUENCE_PARENT_ID, "Confluence Parent Page ID (optional):", getFieldEditorParent()));
-        addField(new StringFieldEditor(PREF_CONFLUENCE_USERNAME, "Confluence Username:", getFieldEditorParent()));
-        addField(new StringFieldEditor(PREF_CONFLUENCE_TOKEN, "Confluence API Token:", getFieldEditorParent()));
     }
 
     @Override

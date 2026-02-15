@@ -24,7 +24,6 @@ import org.eclipse.ui.handlers.HandlerUtil;
 import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.GenerationResult;
 import com.abap.doc.plugin.PluginConsole;
-import com.abap.doc.plugin.confluence.ConfluenceClient;
 import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
 
@@ -50,12 +49,10 @@ public class SaveDocHandler extends AbstractHandler {
         String[] options;
         if (gr.isPackage()) {
             options = new String[] { "HTML Wiki (multiple files)", "Single HTML File",
-                "Markdown File", "PDF File", "Word Document",
-                "Publish to Confluence" };
+                "Markdown File", "PDF File", "Word Document" };
         } else {
             options = new String[] { "Single HTML File", "Markdown File",
-                "PDF File", "Word Document",
-                "Publish to Confluence" };
+                "PDF File", "Word Document" };
         }
 
         MessageDialog dialog = new MessageDialog(shell, "Save Documentation", null,
@@ -82,9 +79,6 @@ public class SaveDocHandler extends AbstractHandler {
                     break;
                 case "Word Document":
                     saveAsDocx(shell, gr);
-                    break;
-                case "Publish to Confluence":
-                    publishToConfluence(shell, gr);
                     break;
             }
         } catch (Exception e) {
@@ -269,76 +263,6 @@ public class SaveDocHandler extends AbstractHandler {
         }
         String base64 = json.substring(startQuote + 1, endQuote);
         return Base64.getDecoder().decode(base64);
-    }
-
-    private static void publishToConfluence(Shell shell, GenerationResult gr) throws Exception {
-        IPreferenceStore store = Activator.getDefault().getPreferenceStore();
-        String confluenceUrl = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_URL);
-        String space = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_SPACE);
-        String parentId = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_PARENT_ID);
-        String username = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_USERNAME);
-        String token = store.getString(ConnectionPreferencePage.PREF_CONFLUENCE_TOKEN);
-
-        if (confluenceUrl.isBlank() || space.isBlank() || username.isBlank() || token.isBlank()) {
-            MessageDialog.openError(shell, "ABAP Doc Generator",
-                "Please configure Confluence settings in Preferences > ABAP Doc Generator.\n"
-                + "Required: URL, Space Key, Username, and API Token.");
-            return;
-        }
-
-        // Use single-page HTML for packages, regular HTML for single objects
-        String html;
-        if (gr.isPackage() && gr.getSinglePageHtml() != null) {
-            html = gr.getSinglePageHtml();
-        } else if (gr.getHtml() != null) {
-            html = gr.getHtml();
-        } else if (gr.getMarkdown() != null) {
-            html = gr.getMarkdown(); // Fallback to markdown
-        } else {
-            MessageDialog.openError(shell, "ABAP Doc Generator", "No content available to publish.");
-            return;
-        }
-
-        // Strip the full HTML wrapper — Confluence needs just the body content
-        String bodyContent = extractHtmlBody(html);
-
-        String title = gr.isPackage()
-            ? "Package " + gr.getObjectName() + " — Documentation"
-            : gr.getObjectName() + " — ABAP Documentation";
-
-        if (!MessageDialog.openConfirm(shell, "Publish to Confluence",
-                "Publish documentation to Confluence?\n\n"
-                + "Space: " + space + "\n"
-                + "Title: " + title + "\n"
-                + "URL: " + confluenceUrl)) {
-            return;
-        }
-
-        PluginConsole.println("Publishing to Confluence: " + confluenceUrl + " / " + space);
-        ConfluenceClient client = new ConfluenceClient(confluenceUrl, username, token);
-        String pageUrl = client.publishPage(space, title, bodyContent, parentId);
-
-        PluginConsole.println("Published to Confluence: " + pageUrl);
-        MessageDialog.openInformation(shell, "ABAP Doc Generator",
-            "Documentation published to Confluence:\n" + pageUrl);
-    }
-
-    /** Extracts content between <body> and </body> tags, or returns the full string. */
-    private static String extractHtmlBody(String html) {
-        int bodyStart = html.indexOf("<body>");
-        int bodyEnd = html.lastIndexOf("</body>");
-        if (bodyStart != -1 && bodyEnd != -1) {
-            return html.substring(bodyStart + 6, bodyEnd).trim();
-        }
-        // Try with attributes on body tag
-        bodyStart = html.indexOf("<body");
-        if (bodyStart != -1) {
-            int tagEnd = html.indexOf(">", bodyStart);
-            if (tagEnd != -1 && bodyEnd != -1) {
-                return html.substring(tagEnd + 1, bodyEnd).trim();
-            }
-        }
-        return html;
     }
 
     private static String openDirectoryDialog(Shell shell) {
