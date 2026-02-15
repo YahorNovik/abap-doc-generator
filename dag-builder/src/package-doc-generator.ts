@@ -508,8 +508,12 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
       }
     }
 
-    // Process sub-packages
+    // Process sub-packages (skip those where all objects are excluded)
     for (const spNode of subPackagesWithObjects) {
+      if (excludedSet && spNode.objects.every((o) => excludedSet.has(o.name))) {
+        log(`[triage] Skipping sub-package ${spNode.name} — all ${spNode.objects.length} objects excluded`);
+        continue;
+      }
       let spObjects = spNode.objects;
       if (spObjects.length > MAX_PACKAGE_OBJECTS) {
         errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
@@ -629,6 +633,11 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       let totalClusterSummaryTokens = rootResult?.tokenUsage.clusterSummaryTokens ?? 0;
 
       for (const spNode of subPackagesWithObjects) {
+        // Skip sub-packages where all objects are excluded
+        if (excludedSet && spNode.objects.every((o) => excludedSet.has(o.name))) {
+          log(`Skipping sub-package ${spNode.name} — all ${spNode.objects.length} objects excluded`);
+          continue;
+        }
         let spObjects = spNode.objects;
         if (spObjects.length > MAX_PACKAGE_OBJECTS) {
           errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
