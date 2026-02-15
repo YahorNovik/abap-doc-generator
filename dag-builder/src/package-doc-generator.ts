@@ -226,8 +226,10 @@ async function processPackageObjects(
       try {
         const response = await callLlm(clusterConfig, buildClusterSummaryPrompt(clusterObjectSummaries, cluster.internalEdges));
         const lines = response.content.split("\n");
-        cluster.name = lines[0].trim();
-        clusterSummaries[cluster.name] = lines.slice(2).join("\n").trim();
+        const suggestedName = lines[0].trim();
+        cluster.name = suggestedName || `Cluster ${cluster.id + 1}`;
+        const summaryText = lines.slice(2).join("\n").trim();
+        clusterSummaries[cluster.name] = summaryText || "[Summary unavailable]";
         clusterSummaryTokens += response.usage.promptTokens + response.usage.completionTokens;
         log(`  Cluster named: ${cluster.name}`);
       } catch (err) {
