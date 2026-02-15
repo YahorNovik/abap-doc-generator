@@ -139,6 +139,48 @@ export interface PackageDocInput {
   userContext?: string;        // additional context/notes from the user
   maxSubPackageDepth?: number; // recursion depth for sub-packages (default 2)
   excludedObjects?: string[];  // object names to skip docs for (still in diagrams)
+
+  // Phase 3 inputs — skip triage/summarization when provided from Phase 2
+  fullDocObjects?: string[];                      // user-approved objects for full docs (skips triage)
+  precomputedSummaries?: Record<string, string>;   // reuse summaries from triage phase
+  precomputedClusterSummaries?: Record<string, string>;
+  precomputedClusterAssignments?: Record<string, string[]>; // clusterName → objectNames
+}
+
+// ─── Triage types (Phase 2) ───
+
+export interface TriageInput {
+  command: "triage-package";
+  systemUrl: string;
+  client: string;
+  username: string;
+  password: string;
+  packageName: string;
+  summaryLlm: LlmConfig;
+  maxSubPackageDepth?: number;
+  excludedObjects?: string[];
+}
+
+export interface TriageResult {
+  packageName: string;
+  objects: Array<{
+    name: string;
+    type: string;
+    summary: string;
+    sourceLines: number;
+    depCount: number;
+    usedByCount: number;
+    triageDecision: "full" | "summary";
+    subPackage: string;
+    clusterName: string;
+  }>;
+  clusters: Array<{
+    name: string;
+    summary: string;
+    objectNames: string[];
+    subPackage: string;
+  }>;
+  errors: string[];
 }
 
 /** A node in the recursive package tree. */

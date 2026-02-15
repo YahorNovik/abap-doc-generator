@@ -9,6 +9,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import org.eclipse.core.runtime.Platform;
@@ -75,6 +76,18 @@ public class DagRunner {
         return runScript(input, progressCallback);
     }
 
+    public String triagePackage(String systemUrl, String client, String username, String password,
+                                String packageName,
+                                String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
+                                int maxSubPackageDepth,
+                                String[] excludedObjects,
+                                Consumer<String> progressCallback) throws IOException, InterruptedException {
+        String input = buildTriageInputJson(systemUrl, client, username, password, packageName,
+            summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
+            maxSubPackageDepth, excludedObjects);
+        return runScript(input, progressCallback);
+    }
+
     public String generatePackageDoc(String systemUrl, String client, String username, String password,
                                      String packageName,
                                      String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
@@ -84,12 +97,17 @@ public class DagRunner {
                                      String userContext,
                                      int maxSubPackageDepth,
                                      String[] excludedObjects,
+                                     String[] fullDocObjects,
+                                     Map<String, String> precomputedSummaries,
+                                     Map<String, String> precomputedClusterSummaries,
+                                     Map<String, String[]> precomputedClusterAssignments,
                                      Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildPackageDocInputJson(systemUrl, client, username, password, packageName,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
             docProvider, docApiKey, docModel, docBaseUrl, maxTotalTokens,
-            templateType, templateCustom, userContext, maxSubPackageDepth, excludedObjects);
+            templateType, templateCustom, userContext, maxSubPackageDepth, excludedObjects,
+            fullDocObjects, precomputedSummaries, precomputedClusterSummaries, precomputedClusterAssignments);
         return runScript(input, progressCallback);
     }
 
@@ -206,6 +224,41 @@ public class DagRunner {
         return sb.toString();
     }
 
+    private static String buildTriageInputJson(String systemUrl, String client, String username, String password,
+                                                String packageName,
+                                                String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
+                                                int maxSubPackageDepth,
+                                                String[] excludedObjects) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"command\":\"triage-package\"");
+        sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
+        sb.append(",\"client\":\"").append(escapeJson(client)).append("\"");
+        sb.append(",\"username\":\"").append(escapeJson(username)).append("\"");
+        sb.append(",\"password\":\"").append(escapeJson(password)).append("\"");
+        sb.append(",\"packageName\":\"").append(escapeJson(packageName)).append("\"");
+        sb.append(",\"summaryLlm\":{");
+        sb.append("\"provider\":\"").append(escapeJson(summaryProvider)).append("\"");
+        sb.append(",\"apiKey\":\"").append(escapeJson(summaryApiKey)).append("\"");
+        sb.append(",\"model\":\"").append(escapeJson(summaryModel)).append("\"");
+        if (summaryBaseUrl != null && !summaryBaseUrl.isEmpty()) {
+            sb.append(",\"baseUrl\":\"").append(escapeJson(summaryBaseUrl)).append("\"");
+        }
+        sb.append("}");
+        if (maxSubPackageDepth > 0) {
+            sb.append(",\"maxSubPackageDepth\":").append(maxSubPackageDepth);
+        }
+        if (excludedObjects != null && excludedObjects.length > 0) {
+            sb.append(",\"excludedObjects\":[");
+            for (int i = 0; i < excludedObjects.length; i++) {
+                if (i > 0) sb.append(",");
+                sb.append("\"").append(escapeJson(excludedObjects[i])).append("\"");
+            }
+            sb.append("]");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
     private static String buildPackageDocInputJson(String systemUrl, String client, String username, String password,
                                                     String packageName,
                                                     String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
@@ -214,7 +267,11 @@ public class DagRunner {
                                                     String templateType, String templateCustom,
                                                     String userContext,
                                                     int maxSubPackageDepth,
-                                                    String[] excludedObjects) {
+                                                    String[] excludedObjects,
+                                                    String[] fullDocObjects,
+                                                    Map<String, String> precomputedSummaries,
+                                                    Map<String, String> precomputedClusterSummaries,
+                                                    Map<String, String[]> precomputedClusterAssignments) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-package-doc\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -261,6 +318,71 @@ public class DagRunner {
             }
             sb.append("]");
         }
+        if (fullDocObjects != null && fullDocObjects.length > 0) {
+            sb.append(",\"fullDocObjects\":[");
+            for (int i = 0; i < fullDocObjects.length; i++) {
+                if (i > 0) sb.append(",");
+                sb.append("\"").append(escapeJson(fullDocObjects[i])).append("\"");
+            }
+            sb.append("]");
+        }
+        if (precomputedSummaries != null && !precomputedSummaries.isEmpty()) {
+            sb.append(",\"precomputedSummaries\":{");
+            boolean first = true;
+            for (Map.Entry<String, String> entry : precomputedSummaries.entrySet()) {
+                if (!first) sb.append(",");
+                sb.append("\"").append(escapeJson(entry.getKey())).append("\":\"").append(escapeJson(entry.getValue())).append("\"");
+                first = false;
+            }
+            sb.append("}");
+        }
+        if (precomputedClusterSummaries != null && !precomputedClusterSummaries.isEmpty()) {
+            sb.append(",\"precomputedClusterSummaries\":{");
+            boolean first = true;
+            for (Map.Entry<String, String> entry : precomputedClusterSummaries.entrySet()) {
+                if (!first) sb.append(",");
+                sb.append("\"").append(escapeJson(entry.getKey())).append("\":\"").append(escapeJson(entry.getValue())).append("\"");
+                first = false;
+            }
+            sb.append("}");
+        }
+        if (precomputedClusterAssignments != null && !precomputedClusterAssignments.isEmpty()) {
+            sb.append(",\"precomputedClusterAssignments\":{");
+            boolean first = true;
+            for (Map.Entry<String, String[]> entry : precomputedClusterAssignments.entrySet()) {
+                if (!first) sb.append(",");
+                sb.append("\"").append(escapeJson(entry.getKey())).append("\":[");
+                String[] names = entry.getValue();
+                for (int i = 0; i < names.length; i++) {
+                    if (i > 0) sb.append(",");
+                    sb.append("\"").append(escapeJson(names[i])).append("\"");
+                }
+                sb.append("]");
+                first = false;
+            }
+            sb.append("}");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    public String exportPdf(String markdown, String title,
+                            Consumer<String> progressCallback) throws IOException, InterruptedException {
+        String input = buildExportInputJson("export-pdf", markdown, title);
+        return runScript(input, progressCallback);
+    }
+
+    public String exportDocx(String markdown, String title,
+                             Consumer<String> progressCallback) throws IOException, InterruptedException {
+        String input = buildExportInputJson("export-docx", markdown, title);
+        return runScript(input, progressCallback);
+    }
+
+    private static String buildExportInputJson(String command, String markdown, String title) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"command\":\"").append(escapeJson(command)).append("\"");
+        sb.append(",\"markdown\":\"").append(escapeJson(markdown)).append("\"");
+        sb.append(",\"title\":\"").append(escapeJson(title)).append("\"");
         sb.append("}");
         return sb.toString();
     }

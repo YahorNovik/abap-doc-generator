@@ -16,7 +16,7 @@ import {
 } from "./html-renderer";
 import {
   PackageDocInput, PackageDocResult, PackageObject, PackageGraph, Cluster, SubPackageNode,
-  DagEdge, DagNode, LlmConfig, ToolCall,
+  DagEdge, DagNode, LlmConfig, ToolCall, TriageInput, TriageResult,
 } from "./types";
 
 const MAX_PACKAGE_OBJECTS = 100;
@@ -24,6 +24,27 @@ const DOC_AGENT_MAX_ITERATIONS = 5;
 
 function log(msg: string): void {
   process.stderr.write(`[package-doc] ${msg}\n`);
+}
+
+/** Triage metadata for a single object (returned in triage-only mode). */
+export interface TriageObjectMeta {
+  name: string;
+  type: string;
+  summary: string;
+  sourceLines: number;
+  depCount: number;
+  usedByCount: number;
+  triageDecision: "full" | "summary";
+  clusterName: string;
+}
+
+/** Options controlling what processPackageObjects does. */
+interface ProcessOptions {
+  triageOnly?: boolean;
+  fullDocObjects?: Set<string>;
+  precomputedSummaries?: Record<string, string>;
+  precomputedClusterSummaries?: Record<string, string>;
+  precomputedClusterAssignments?: Record<string, string[]>;
 }
 
 /** Result of processing one (sub-)package's objects. */
@@ -34,6 +55,7 @@ interface ProcessResult {
   objectDocs: Record<string, string>;
   clusterSummaries: Record<string, string>;
   tokenUsage: { summaryTokens: number; objectDocTokens: number; clusterSummaryTokens: number };
+  triageMetadata?: TriageObjectMeta[];
 }
 
 /**
@@ -48,13 +70,19 @@ async function processPackageObjects(
   input: PackageDocInput,
   errors: string[],
   excludedSet?: Set<string>,
+  options?: ProcessOptions,
 ): Promise<ProcessResult> {
-  const summaries: Record<string, string> = {};
+  const summaries: Record<string, string> = options?.precomputedSummaries ? { ...options.precomputedSummaries } : {};
   const objectDocs: Record<string, string> = {};
-  const clusterSummaries: Record<string, string> = {};
+  const clusterSummaries: Record<string, string> = options?.precomputedClusterSummaries ? { ...options.precomputedClusterSummaries } : {};
   let summaryTokens = 0;
   let objectDocTokens = 0;
   let clusterSummaryTokens = 0;
+  const triageMetadata: TriageObjectMeta[] = [];
+
+  const hasSummaries = !!options?.precomputedSummaries;
+  const hasClusterSummaries = !!options?.precomputedClusterSummaries;
+  const hasClusterAssignments = !!options?.precomputedClusterAssignments;
 
   // Fetch source for all objects
   log(`[${packageLabel}] Fetching source code for ${objects.length} objects...`);
@@ -69,10 +97,21 @@ async function processPackageObjects(
   const graph = buildPackageGraph(objects, sources, errors);
   log(`[${packageLabel}] Internal edges: ${graph.internalEdges.length}, External deps: ${graph.externalDependencies.length}`);
 
-  // Detect clusters via Union-Find
-  log(`[${packageLabel}] Detecting functional clusters...`);
-  const clusters = detectClusters(graph);
-  log(`[${packageLabel}] Found ${clusters.length} cluster(s).`);
+  // Detect clusters via Union-Find (or use precomputed assignments)
+  let clusters: Cluster[];
+  if (hasClusterAssignments) {
+    log(`[${packageLabel}] Using precomputed cluster assignments...`);
+    clusters = rebuildClustersFromAssignments(objects, graph, options!.precomputedClusterAssignments!);
+    // Restore cluster names from precomputed summaries
+    for (const cluster of clusters) {
+      if (clusterSummaries[cluster.name]) continue;
+    }
+    log(`[${packageLabel}] Restored ${clusters.length} cluster(s) from precomputed assignments.`);
+  } else {
+    log(`[${packageLabel}] Detecting functional clusters...`);
+    clusters = detectClusters(graph);
+    log(`[${packageLabel}] Found ${clusters.length} cluster(s).`);
+  }
 
   // Process each cluster
   for (let ci = 0; ci < clusters.length; ci++) {
@@ -86,61 +125,68 @@ async function processPackageObjects(
     }
     const objectMap = new Map(cluster.objects.map((o) => [o.name, o]));
 
-    // Summarize each object
-    // Use topological levels to run parallel calls within each level,
-    // ensuring dependencies are summarized before dependents.
-    const levels = computeTopologicalLevels(cluster.topologicalOrder, edgesByFrom, "");
-    const maxLevel = cluster.topologicalOrder.length > 0
-      ? Math.max(0, ...Array.from(levels.values()))
-      : 0;
-    log(`  Computed ${maxLevel + 1} topological level(s) for summarization.`);
+    // Summarize each object (skip if precomputed summaries provided)
+    if (!hasSummaries) {
+      const levels = computeTopologicalLevels(cluster.topologicalOrder, edgesByFrom, "");
+      const maxLevel = cluster.topologicalOrder.length > 0
+        ? Math.max(0, ...Array.from(levels.values()))
+        : 0;
+      log(`  Computed ${maxLevel + 1} topological level(s) for summarization.`);
 
-    for (let level = 0; level <= maxLevel; level++) {
-      const nodesAtLevel = cluster.topologicalOrder.filter((n) => levels.get(n) === level);
-      if (nodesAtLevel.length === 0) continue;
+      for (let level = 0; level <= maxLevel; level++) {
+        const nodesAtLevel = cluster.topologicalOrder.filter((n) => levels.get(n) === level);
+        if (nodesAtLevel.length === 0) continue;
 
-      // Build call specs for all nodes at this level
-      const callSpecs: Array<{ name: string; messages: import("./types").LlmMessage[] }> = [];
-      for (const name of nodesAtLevel) {
-        if (excludedSet?.has(name)) continue;
-        const obj = objectMap.get(name);
-        if (!obj) continue;
-        const source = sources.get(name);
-        if (!source) { errors.push(`No source for ${name}, skipping.`); continue; }
-        const edges = edgesByFrom.get(name) ?? [];
-        const depSums = edges.filter((e) => summaries[e.to]).map((e) => ({ name: e.to, summary: summaries[e.to] }));
-        const dagNode: DagNode = {
-          name, type: obj.type, isCustom: true, sourceAvailable: true,
-          usedBy: cluster.internalEdges.filter((e) => e.to === name).map((e) => e.from),
-        };
-        callSpecs.push({ name, messages: buildSummaryPrompt(dagNode, source, depSums) });
-      }
-      if (callSpecs.length === 0) continue;
-      log(`  Level ${level}: ${callSpecs.length} node(s) — summarizing in parallel...`);
+        const callSpecs: Array<{ name: string; messages: import("./types").LlmMessage[] }> = [];
+        for (const name of nodesAtLevel) {
+          if (excludedSet?.has(name)) continue;
+          const obj = objectMap.get(name);
+          if (!obj) continue;
+          const source = sources.get(name);
+          if (!source) { errors.push(`No source for ${name}, skipping.`); continue; }
+          const edges = edgesByFrom.get(name) ?? [];
+          const depSums = edges.filter((e) => summaries[e.to]).map((e) => ({ name: e.to, summary: summaries[e.to] }));
+          const dagNode: DagNode = {
+            name, type: obj.type, isCustom: true, sourceAvailable: true,
+            usedBy: cluster.internalEdges.filter((e) => e.to === name).map((e) => e.from),
+          };
+          callSpecs.push({ name, messages: buildSummaryPrompt(dagNode, source, depSums) });
+        }
+        if (callSpecs.length === 0) continue;
+        log(`  Level ${level}: ${callSpecs.length} node(s) — summarizing in parallel...`);
 
-      // Fire all calls in parallel within this level
-      const results = await Promise.allSettled(
-        callSpecs.map((spec) => callLlm(input.summaryLlm, spec.messages)),
-      );
+        const results = await Promise.allSettled(
+          callSpecs.map((spec) => callLlm(input.summaryLlm, spec.messages)),
+        );
 
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const name = callSpecs[i].name;
-        if (result.status === "fulfilled") {
-          summaries[name] = result.value.content;
-          summaryTokens += result.value.usage.promptTokens + result.value.usage.completionTokens;
-          log(`  Summarized ${name}`);
-        } else {
-          summaries[name] = objectMap.get(name)?.description || "[Summary unavailable]";
-          errors.push(`Summary for ${name} failed: ${String(result.reason)}`);
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          const name = callSpecs[i].name;
+          if (result.status === "fulfilled") {
+            summaries[name] = result.value.content;
+            summaryTokens += result.value.usage.promptTokens + result.value.usage.completionTokens;
+            log(`  Summarized ${name}`);
+          } else {
+            summaries[name] = objectMap.get(name)?.description || "[Summary unavailable]";
+            errors.push(`Summary for ${name} failed: ${String(result.reason)}`);
+          }
         }
       }
+    } else {
+      log(`  Using precomputed summaries for ${cluster.objects.length} objects.`);
     }
 
     // Triage
     const triageSet = new Set<string>();
     const triageCandidates = cluster.objects.filter((o) => !excludedSet?.has(o.name));
-    if (triageCandidates.length > 1) {
+
+    if (options?.fullDocObjects) {
+      // Phase 3: use user-approved list
+      for (const o of triageCandidates) {
+        if (options.fullDocObjects.has(o.name)) triageSet.add(o.name);
+      }
+      log(`  Triage (user override): ${triageSet.size}/${triageCandidates.length} objects selected for full documentation.`);
+    } else if (triageCandidates.length > 1) {
       const triageInput = triageCandidates
         .filter((o) => sources.has(o.name))
         .map((o) => {
@@ -164,92 +210,272 @@ async function processPackageObjects(
       for (const o of triageCandidates) triageSet.add(o.name);
     }
 
-    // Generate individual object docs (only for triaged objects, skip excluded)
-    for (const obj of cluster.objects) {
-      if (excludedSet?.has(obj.name)) continue;
-      if (!triageSet.has(obj.name)) {
-        log(`  Skipping doc for ${obj.name} (triage: summary only).`);
-        continue;
-      }
-      const source = sources.get(obj.name);
-      if (!source) continue;
+    // Collect triage metadata (for triage-only mode or always — cheap to compute)
+    for (const obj of triageCandidates) {
+      if (!sources.has(obj.name)) continue;
+      const srcLines = (sources.get(obj.name) ?? "").split("\n").length;
+      const depCount = (edgesByFrom.get(obj.name) ?? []).length;
+      const usedByCount = cluster.internalEdges.filter((e) => e.to === obj.name).length;
+      triageMetadata.push({
+        name: obj.name,
+        type: obj.type,
+        summary: summaries[obj.name] ?? (obj.description || "[Summary unavailable]"),
+        sourceLines: srcLines,
+        depCount,
+        usedByCount,
+        triageDecision: triageSet.has(obj.name) ? "full" : "summary",
+        clusterName: "", // will be set after cluster naming
+      });
+    }
 
-      const dagNode: DagNode = {
-        name: obj.name, type: obj.type, isCustom: true, sourceAvailable: true,
-        usedBy: cluster.internalEdges.filter((e) => e.to === obj.name).map((e) => e.from),
-      };
-      const edges = edgesByFrom.get(obj.name) ?? [];
-      const depDetails = edges.filter((e) => summaries[e.to]).map((e) => ({
-        name: e.to, type: objectMap.get(e.to)?.type ?? "UNKNOWN", summary: summaries[e.to],
-        usedMembers: e.references.map((r) => ({ memberName: r.memberName, memberType: r.memberType })),
-      }));
-      const internalWhereUsed = cluster.internalEdges
-        .filter((e) => e.to === obj.name)
-        .map((e) => ({ name: e.from, type: objectMap.get(e.from)?.type ?? "UNKNOWN", description: "Package-internal reference" }));
-
-      const template = resolveTemplate(input.templateType, input.templateCustom, obj.type);
-      const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
-      const docMessages = buildDocPrompt(dagNode, source, depDetails, template, internalWhereUsed, input.userContext);
-
-      const toolExecutor = async (tc: ToolCall): Promise<string> => {
-        switch (tc.name) {
-          case "get_source":
-            try { return await client.fetchSource(tc.arguments.object_name); }
-            catch (err) { return `Error: ${String(err)}`; }
-          case "get_where_used":
-            try {
-              const refs = await client.getWhereUsed(tc.arguments.object_name);
-              if (refs.length === 0) return "No where-used references found.";
-              return refs.map((r) => `${r.name} (${r.type}): ${r.description}`).join("\n");
-            } catch (err) { return `Error: ${String(err)}`; }
-          default: return `Unknown tool: ${tc.name}`;
+    // In triage-only mode, skip full doc generation
+    if (!options?.triageOnly) {
+      // Generate individual object docs (only for triaged objects, skip excluded)
+      for (const obj of cluster.objects) {
+        if (excludedSet?.has(obj.name)) continue;
+        if (!triageSet.has(obj.name)) {
+          log(`  Skipping doc for ${obj.name} (triage: summary only).`);
+          continue;
         }
-      };
+        const source = sources.get(obj.name);
+        if (!source) continue;
 
-      try {
-        log(`  Generating doc for ${obj.name}...`);
-        const response = await callLlmAgentLoop(docConfig, docMessages, AGENT_TOOLS, toolExecutor, DOC_AGENT_MAX_ITERATIONS, 0);
-        objectDocs[obj.name] = response.content;
-        objectDocTokens += response.usage.promptTokens + response.usage.completionTokens;
-      } catch (err) {
-        objectDocs[obj.name] = `Documentation generation failed: ${String(err)}`;
-        errors.push(`Failed to generate doc for ${obj.name}: ${String(err)}`);
+        const dagNode: DagNode = {
+          name: obj.name, type: obj.type, isCustom: true, sourceAvailable: true,
+          usedBy: cluster.internalEdges.filter((e) => e.to === obj.name).map((e) => e.from),
+        };
+        const edges = edgesByFrom.get(obj.name) ?? [];
+        const depDetails = edges.filter((e) => summaries[e.to]).map((e) => ({
+          name: e.to, type: objectMap.get(e.to)?.type ?? "UNKNOWN", summary: summaries[e.to],
+          usedMembers: e.references.map((r) => ({ memberName: r.memberName, memberType: r.memberType })),
+        }));
+        const internalWhereUsed = cluster.internalEdges
+          .filter((e) => e.to === obj.name)
+          .map((e) => ({ name: e.from, type: objectMap.get(e.from)?.type ?? "UNKNOWN", description: "Package-internal reference" }));
+
+        const template = resolveTemplate(input.templateType, input.templateCustom, obj.type);
+        const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
+        const docMessages = buildDocPrompt(dagNode, source, depDetails, template, internalWhereUsed, input.userContext);
+
+        const toolExecutor = async (tc: ToolCall): Promise<string> => {
+          switch (tc.name) {
+            case "get_source":
+              try { return await client.fetchSource(tc.arguments.object_name); }
+              catch (err) { return `Error: ${String(err)}`; }
+            case "get_where_used":
+              try {
+                const refs = await client.getWhereUsed(tc.arguments.object_name);
+                if (refs.length === 0) return "No where-used references found.";
+                return refs.map((r) => `${r.name} (${r.type}): ${r.description}`).join("\n");
+              } catch (err) { return `Error: ${String(err)}`; }
+            default: return `Unknown tool: ${tc.name}`;
+          }
+        };
+
+        try {
+          log(`  Generating doc for ${obj.name}...`);
+          const response = await callLlmAgentLoop(docConfig, docMessages, AGENT_TOOLS, toolExecutor, DOC_AGENT_MAX_ITERATIONS, 0);
+          objectDocs[obj.name] = response.content;
+          objectDocTokens += response.usage.promptTokens + response.usage.completionTokens;
+        } catch (err) {
+          objectDocs[obj.name] = `Documentation generation failed: ${String(err)}`;
+          errors.push(`Failed to generate doc for ${obj.name}: ${String(err)}`);
+        }
       }
     }
 
-    // Generate cluster summary
-    if (cluster.name !== "Standalone Objects" && cluster.objects.length > 1) {
-      const clusterObjectSummaries = cluster.objects.map((o) => ({
-        name: o.name, type: o.type, summary: summaries[o.name] ?? o.description,
-      }));
-      const clusterConfig: LlmConfig = { ...input.summaryLlm, maxTokens: CLUSTER_SUMMARY_MAX_TOKENS };
-      try {
-        const response = await callLlm(clusterConfig, buildClusterSummaryPrompt(clusterObjectSummaries, cluster.internalEdges));
-        // Skip leading blank lines — some models prepend newlines
-        const lines = response.content.split("\n");
-        const firstNonEmpty = lines.findIndex((l) => l.trim().length > 0);
-        const suggestedName = firstNonEmpty >= 0 ? lines[firstNonEmpty].trim() : "";
-        cluster.name = suggestedName || `Cluster ${cluster.id + 1}`;
-        const summaryLines = firstNonEmpty >= 0 ? lines.slice(firstNonEmpty + 1) : lines;
-        const summaryText = summaryLines.join("\n").trim();
-        clusterSummaries[cluster.name] = summaryText || "[Summary unavailable]";
-        clusterSummaryTokens += response.usage.promptTokens + response.usage.completionTokens;
-        log(`  Cluster named: ${cluster.name}`);
-      } catch (err) {
-        cluster.name = `Cluster ${cluster.id + 1}`;
-        clusterSummaries[cluster.name] = "[Summary unavailable]";
-        errors.push(`Failed to summarize cluster ${cluster.id}: ${String(err)}`);
+    // Generate cluster summary (skip if precomputed)
+    if (!hasClusterSummaries) {
+      if (cluster.name !== "Standalone Objects" && cluster.objects.length > 1) {
+        const clusterObjectSummaries = cluster.objects.map((o) => ({
+          name: o.name, type: o.type, summary: summaries[o.name] ?? o.description,
+        }));
+        const clusterConfig: LlmConfig = { ...input.summaryLlm, maxTokens: CLUSTER_SUMMARY_MAX_TOKENS };
+        try {
+          const response = await callLlm(clusterConfig, buildClusterSummaryPrompt(clusterObjectSummaries, cluster.internalEdges));
+          // Skip leading blank lines — some models prepend newlines
+          const lines = response.content.split("\n");
+          const firstNonEmpty = lines.findIndex((l) => l.trim().length > 0);
+          const suggestedName = firstNonEmpty >= 0 ? lines[firstNonEmpty].trim() : "";
+          cluster.name = suggestedName || `Cluster ${cluster.id + 1}`;
+          const summaryLines = firstNonEmpty >= 0 ? lines.slice(firstNonEmpty + 1) : lines;
+          const summaryText = summaryLines.join("\n").trim();
+          clusterSummaries[cluster.name] = summaryText || "[Summary unavailable]";
+          clusterSummaryTokens += response.usage.promptTokens + response.usage.completionTokens;
+          log(`  Cluster named: ${cluster.name}`);
+        } catch (err) {
+          cluster.name = `Cluster ${cluster.id + 1}`;
+          clusterSummaries[cluster.name] = "[Summary unavailable]";
+          errors.push(`Failed to summarize cluster ${cluster.id}: ${String(err)}`);
+        }
+      } else if (cluster.name === "Standalone Objects") {
+        clusterSummaries[cluster.name] = "Objects with no internal package dependencies.";
+      } else if (cluster.objects.length === 1) {
+        const obj = cluster.objects[0];
+        cluster.name = obj.name;
+        clusterSummaries[cluster.name] = summaries[obj.name] ?? obj.description;
       }
-    } else if (cluster.name === "Standalone Objects") {
-      clusterSummaries[cluster.name] = "Objects with no internal package dependencies.";
-    } else if (cluster.objects.length === 1) {
-      const obj = cluster.objects[0];
-      cluster.name = obj.name;
-      clusterSummaries[cluster.name] = summaries[obj.name] ?? obj.description;
+    }
+
+    // Back-fill cluster name in triage metadata
+    for (const meta of triageMetadata) {
+      if (cluster.objects.some((o) => o.name === meta.name)) {
+        meta.clusterName = cluster.name;
+      }
     }
   }
 
-  return { clusters, graph, summaries, objectDocs, clusterSummaries, tokenUsage: { summaryTokens, objectDocTokens, clusterSummaryTokens } };
+  return { clusters, graph, summaries, objectDocs, clusterSummaries, tokenUsage: { summaryTokens, objectDocTokens, clusterSummaryTokens }, triageMetadata };
+}
+
+/**
+ * Rebuild Cluster objects from precomputed cluster assignments.
+ * Used in Phase 3 to skip cluster detection.
+ */
+function rebuildClustersFromAssignments(
+  objects: PackageObject[],
+  graph: PackageGraph,
+  assignments: Record<string, string[]>,
+): Cluster[] {
+  const objectsByName = new Map(objects.map((o) => [o.name, o]));
+  const clusters: Cluster[] = [];
+  let id = 0;
+
+  for (const [clusterName, objectNames] of Object.entries(assignments)) {
+    const clusterObjects = objectNames
+      .map((n) => objectsByName.get(n))
+      .filter((o): o is PackageObject => !!o);
+    if (clusterObjects.length === 0) continue;
+
+    const nameSet = new Set(objectNames);
+    const internalEdges = graph.internalEdges.filter(
+      (e) => nameSet.has(e.from) && nameSet.has(e.to),
+    );
+
+    // Simple topological sort within cluster
+    const inDegree = new Map<string, number>();
+    for (const n of objectNames) inDegree.set(n, 0);
+    for (const e of internalEdges) {
+      inDegree.set(e.from, (inDegree.get(e.from) ?? 0) + 1);
+    }
+    const queue = objectNames.filter((n) => (inDegree.get(n) ?? 0) === 0);
+    const topo: string[] = [];
+    while (queue.length > 0) {
+      const n = queue.shift()!;
+      topo.push(n);
+      for (const e of internalEdges.filter((e) => e.to === n)) {
+        const deg = (inDegree.get(e.from) ?? 1) - 1;
+        inDegree.set(e.from, deg);
+        if (deg === 0) queue.push(e.from);
+      }
+    }
+    // Add any remaining nodes not in topo
+    for (const n of objectNames) {
+      if (!topo.includes(n)) topo.push(n);
+    }
+
+    clusters.push({
+      id: id++,
+      name: clusterName,
+      objects: clusterObjects,
+      internalEdges,
+      topologicalOrder: topo,
+    });
+  }
+
+  return clusters;
+}
+
+/**
+ * Runs Phase 2: source fetch, graph, summarization, clustering, triage.
+ * Returns triage decisions + summaries for the user to review before Phase 3.
+ */
+export async function triagePackage(input: TriageInput): Promise<TriageResult> {
+  const errors: string[] = [];
+  const excludedSet = input.excludedObjects && input.excludedObjects.length > 0
+    ? new Set(input.excludedObjects)
+    : undefined;
+
+  const client = await createConnectedClient(
+    input.systemUrl, input.username, input.password, input.client,
+  );
+
+  try {
+    const maxDepth = input.maxSubPackageDepth ?? 2;
+    log(`[triage] Discovering package tree for ${input.packageName} (max depth: ${maxDepth})...`);
+    const tree = await discoverPackageTree(client, input.packageName, maxDepth, errors);
+
+    const allNodes = flattenPackageTree(tree);
+    const subPackagesWithObjects = allNodes.filter((n) => n.depth > 0 && n.objects.length > 0);
+    const totalObjects = allNodes.reduce((n, p) => n + p.objects.length, 0);
+    log(`[triage] Package tree: ${allNodes.length} package(s), ${totalObjects} total objects.`);
+
+    if (totalObjects === 0) {
+      return { packageName: input.packageName, objects: [], clusters: [], errors: [...errors, "No relevant custom objects found."] };
+    }
+
+    // Build a fake PackageDocInput just for processPackageObjects (only summaryLlm used in triage mode)
+    const pseudoInput: PackageDocInput = {
+      command: "generate-package-doc",
+      systemUrl: input.systemUrl,
+      client: input.client,
+      username: input.username,
+      password: input.password,
+      packageName: input.packageName,
+      summaryLlm: input.summaryLlm,
+      docLlm: input.summaryLlm, // not used in triage-only mode
+      excludedObjects: input.excludedObjects,
+    };
+
+    const allTriageObjects: TriageResult["objects"] = [];
+    const allClusters: TriageResult["clusters"] = [];
+
+    // Process root objects
+    let rootObjects = tree.objects;
+    if (rootObjects.length > MAX_PACKAGE_OBJECTS) {
+      errors.push(`Root package has ${rootObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
+      rootObjects = rootObjects.slice(0, MAX_PACKAGE_OBJECTS);
+    }
+    if (rootObjects.length > 0) {
+      const result = await processPackageObjects(client, rootObjects, input.packageName, pseudoInput, errors, excludedSet, { triageOnly: true });
+      for (const meta of result.triageMetadata ?? []) {
+        allTriageObjects.push({ ...meta, subPackage: "" });
+      }
+      for (const cluster of result.clusters) {
+        allClusters.push({
+          name: cluster.name,
+          summary: result.clusterSummaries[cluster.name] ?? "",
+          objectNames: cluster.objects.map((o) => o.name),
+          subPackage: "",
+        });
+      }
+    }
+
+    // Process sub-packages
+    for (const spNode of subPackagesWithObjects) {
+      let spObjects = spNode.objects;
+      if (spObjects.length > MAX_PACKAGE_OBJECTS) {
+        errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
+        spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
+      }
+      const result = await processPackageObjects(client, spObjects, spNode.name, pseudoInput, errors, excludedSet, { triageOnly: true });
+      for (const meta of result.triageMetadata ?? []) {
+        allTriageObjects.push({ ...meta, subPackage: spNode.name });
+      }
+      for (const cluster of result.clusters) {
+        allClusters.push({
+          name: cluster.name,
+          summary: result.clusterSummaries[cluster.name] ?? "",
+          objectNames: cluster.objects.map((o) => o.name),
+          subPackage: spNode.name,
+        });
+      }
+    }
+
+    return { packageName: input.packageName, objects: allTriageObjects, clusters: allClusters, errors };
+  } finally {
+    try { await client.disconnect(); } catch { /* ignore */ }
+  }
 }
 
 /**
@@ -290,13 +516,23 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       rootObjects = rootObjects.slice(0, MAX_PACKAGE_OBJECTS);
     }
 
+    // Build process options from precomputed Phase 2 data
+    const processOpts: ProcessOptions | undefined = (input.fullDocObjects || input.precomputedSummaries || input.precomputedClusterSummaries)
+      ? {
+          fullDocObjects: input.fullDocObjects ? new Set(input.fullDocObjects) : undefined,
+          precomputedSummaries: input.precomputedSummaries,
+          precomputedClusterSummaries: input.precomputedClusterSummaries,
+          precomputedClusterAssignments: input.precomputedClusterAssignments,
+        }
+      : undefined;
+
     if (!hasSubPackages) {
       // ─── FLAT FLOW (no sub-packages) — existing behavior with summaries ───
       if (rootObjects.length === 0) {
         return emptyResult(input.packageName, errors);
       }
 
-      const result = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet);
+      const result = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet, processOpts);
       const aggregatedExternalDeps = aggregateExternalDeps(result.graph);
 
       const documentation = assembleDocument(input.packageName, result.clusters, result.clusterSummaries, result.objectDocs, aggregatedExternalDeps, result.summaries);
@@ -325,7 +561,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       let rootExternalDeps: Array<{ name: string; type: string; usedBy: string[] }> = [];
       if (rootObjects.length > 0) {
         log(`Processing root package objects (${rootObjects.length})...`);
-        rootResult = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet);
+        rootResult = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet, processOpts);
         rootExternalDeps = aggregateExternalDeps(rootResult.graph);
       }
 
@@ -343,7 +579,7 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
         }
 
         log(`Processing sub-package ${spNode.name} (${spObjects.length} objects)...`);
-        const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet);
+        const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet, processOpts);
         const spExternalDeps = aggregateExternalDeps(spResult.graph);
 
         spRenderData.push({

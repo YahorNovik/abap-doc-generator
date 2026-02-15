@@ -1,8 +1,9 @@
 import { buildDag, createConnectedClient } from "./dag-builder";
 import { generateDocumentation } from "./doc-generator";
-import { generatePackageDocumentation } from "./package-doc-generator";
+import { generatePackageDocumentation, triagePackage } from "./package-doc-generator";
 import { handleChat } from "./chat-handler";
 import { listPackageObjects } from "./package-graph";
+import { exportPdf, exportDocx } from "./exporter";
 import { ListObjectsResult } from "./types";
 
 async function main(): Promise<void> {
@@ -16,13 +17,24 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (!input.systemUrl || (!input.objectName && !input.packageName)) {
+  if (input.command === "export-pdf" || input.command === "export-docx") {
+    if (!input.markdown) {
+      process.stderr.write("Error: markdown is required for export commands\n");
+      process.exit(1);
+    }
+  } else if (!input.systemUrl || (!input.objectName && !input.packageName)) {
     process.stderr.write("Error: systemUrl and objectName (or packageName) are required\n");
     process.exit(1);
   }
 
   try {
-    if (input.command === "list-package-objects") {
+    if (input.command === "export-pdf") {
+      const buffer = await exportPdf(input.markdown, input.title ?? "Documentation");
+      process.stdout.write(JSON.stringify({ data: buffer.toString("base64") }));
+    } else if (input.command === "export-docx") {
+      const buffer = await exportDocx(input.markdown, input.title ?? "Documentation");
+      process.stdout.write(JSON.stringify({ data: buffer.toString("base64") }));
+    } else if (input.command === "list-package-objects") {
       if (!input.packageName) {
         process.stderr.write("Error: packageName is required for list-package-objects\n");
         process.exit(1);
@@ -43,6 +55,17 @@ async function main(): Promise<void> {
       } finally {
         try { await client.disconnect(); } catch { /* ignore */ }
       }
+    } else if (input.command === "triage-package") {
+      if (!input.summaryLlm) {
+        process.stderr.write("Error: summaryLlm config is required for triage-package\n");
+        process.exit(1);
+      }
+      if (!input.packageName) {
+        process.stderr.write("Error: packageName is required for triage-package\n");
+        process.exit(1);
+      }
+      const result = await triagePackage(input);
+      process.stdout.write(JSON.stringify(result));
     } else if (input.command === "generate-package-doc") {
       if (!input.summaryLlm || !input.docLlm) {
         process.stderr.write("Error: summaryLlm and docLlm configs are required for generate-package-doc\n");

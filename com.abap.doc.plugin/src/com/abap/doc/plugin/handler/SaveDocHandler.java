@@ -3,11 +3,16 @@ package com.abap.doc.plugin.handler;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Base64;
 import java.util.Map;
 
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.swt.SWT;
@@ -20,6 +25,7 @@ import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.GenerationResult;
 import com.abap.doc.plugin.PluginConsole;
 import com.abap.doc.plugin.confluence.ConfluenceClient;
+import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
 
 public class SaveDocHandler extends AbstractHandler {
@@ -44,9 +50,11 @@ public class SaveDocHandler extends AbstractHandler {
         String[] options;
         if (gr.isPackage()) {
             options = new String[] { "HTML Wiki (multiple files)", "Single HTML File",
-                "Markdown File", "Publish to Confluence" };
+                "Markdown File", "PDF File", "Word Document",
+                "Publish to Confluence" };
         } else {
             options = new String[] { "Single HTML File", "Markdown File",
+                "PDF File", "Word Document",
                 "Publish to Confluence" };
         }
 
@@ -68,6 +76,12 @@ public class SaveDocHandler extends AbstractHandler {
                     break;
                 case "Markdown File":
                     saveMarkdown(shell, gr);
+                    break;
+                case "PDF File":
+                    saveAsPdf(shell, gr);
+                    break;
+                case "Word Document":
+                    saveAsDocx(shell, gr);
                     break;
                 case "Publish to Confluence":
                     publishToConfluence(shell, gr);
@@ -145,6 +159,116 @@ public class SaveDocHandler extends AbstractHandler {
         PluginConsole.println("Saved Markdown to " + path);
         MessageDialog.openInformation(shell, "ABAP Doc Generator",
             "Documentation saved to:\n" + path);
+    }
+
+    private static void saveAsPdf(Shell shell, GenerationResult gr) {
+        String md = gr.getMarkdown();
+        if (md == null || md.isBlank()) {
+            MessageDialog.openError(shell, "ABAP Doc Generator", "No Markdown content available for PDF export.");
+            return;
+        }
+
+        FileDialog fd = new FileDialog(shell, SWT.SAVE);
+        fd.setText("Save as PDF");
+        fd.setFilterExtensions(new String[] { "*.pdf" });
+        fd.setFileName(gr.getObjectName() + ".pdf");
+        applyDefaultPath(fd);
+        String path = fd.open();
+        if (path == null) return;
+
+        String title = gr.isPackage()
+            ? "Package " + gr.getObjectName()
+            : gr.getObjectName();
+
+        final String filePath = path;
+        Job job = new Job("Exporting PDF...") {
+            @Override
+            protected IStatus run(IProgressMonitor monitor) {
+                try {
+                    DagRunner runner = new DagRunner();
+                    String json = runner.exportPdf(md, title, msg -> PluginConsole.println(msg));
+                    byte[] pdfBytes = extractBase64Data(json);
+                    Files.write(new File(filePath).toPath(), pdfBytes);
+
+                    shell.getDisplay().asyncExec(() -> {
+                        PluginConsole.println("Saved PDF to " + filePath);
+                        MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                            "PDF saved to:\n" + filePath);
+                    });
+                    return Status.OK_STATUS;
+                } catch (Exception e) {
+                    shell.getDisplay().asyncExec(() ->
+                        MessageDialog.openError(shell, "ABAP Doc Generator",
+                            "Failed to export PDF: " + e.getMessage()));
+                    return Status.CANCEL_STATUS;
+                }
+            }
+        };
+        job.setUser(true);
+        job.schedule();
+    }
+
+    private static void saveAsDocx(Shell shell, GenerationResult gr) {
+        String md = gr.getMarkdown();
+        if (md == null || md.isBlank()) {
+            MessageDialog.openError(shell, "ABAP Doc Generator", "No Markdown content available for DOCX export.");
+            return;
+        }
+
+        FileDialog fd = new FileDialog(shell, SWT.SAVE);
+        fd.setText("Save as Word Document");
+        fd.setFilterExtensions(new String[] { "*.docx" });
+        fd.setFileName(gr.getObjectName() + ".docx");
+        applyDefaultPath(fd);
+        String path = fd.open();
+        if (path == null) return;
+
+        String title = gr.isPackage()
+            ? "Package " + gr.getObjectName()
+            : gr.getObjectName();
+
+        final String filePath = path;
+        Job job = new Job("Exporting Word Document...") {
+            @Override
+            protected IStatus run(IProgressMonitor monitor) {
+                try {
+                    DagRunner runner = new DagRunner();
+                    String json = runner.exportDocx(md, title, msg -> PluginConsole.println(msg));
+                    byte[] docxBytes = extractBase64Data(json);
+                    Files.write(new File(filePath).toPath(), docxBytes);
+
+                    shell.getDisplay().asyncExec(() -> {
+                        PluginConsole.println("Saved Word document to " + filePath);
+                        MessageDialog.openInformation(shell, "ABAP Doc Generator",
+                            "Word document saved to:\n" + filePath);
+                    });
+                    return Status.OK_STATUS;
+                } catch (Exception e) {
+                    shell.getDisplay().asyncExec(() ->
+                        MessageDialog.openError(shell, "ABAP Doc Generator",
+                            "Failed to export Word document: " + e.getMessage()));
+                    return Status.CANCEL_STATUS;
+                }
+            }
+        };
+        job.setUser(true);
+        job.schedule();
+    }
+
+    private static byte[] extractBase64Data(String json) throws Exception {
+        // Extract the "data":"..." field from JSON response
+        int dataIdx = json.indexOf("\"data\"");
+        if (dataIdx == -1) {
+            throw new Exception("No data field in export response");
+        }
+        int colonIdx = json.indexOf(":", dataIdx);
+        int startQuote = json.indexOf("\"", colonIdx + 1);
+        int endQuote = json.indexOf("\"", startQuote + 1);
+        if (startQuote == -1 || endQuote == -1) {
+            throw new Exception("Malformed data field in export response");
+        }
+        String base64 = json.substring(startQuote + 1, endQuote);
+        return Base64.getDecoder().decode(base64);
     }
 
     private static void publishToConfluence(Shell shell, GenerationResult gr) throws Exception {
