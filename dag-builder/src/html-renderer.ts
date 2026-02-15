@@ -269,9 +269,11 @@ export function buildIndexPage(
   objectLinkPrefix?: string,
   parentPackageName?: string,
 ): string {
-  const knownObjects = new Set<string>();
+  const objectsWithPages = new Set<string>();
   for (const c of clusters) {
-    for (const o of c.objects) knownObjects.add(o.name);
+    for (const o of c.objects) {
+      if (objectDocs?.[o.name] || summaries?.[o.name]) objectsWithPages.add(o.name);
+    }
   }
   const linkPrefix = objectLinkPrefix ?? "";
 
@@ -293,9 +295,6 @@ export function buildIndexPage(
     }
 
     // Cluster dependency diagram — only link objects that have pages
-    const objectsWithPages = new Set(
-      cluster.objects.filter((o) => objectDocs?.[o.name] || summaries?.[o.name]).map((o) => o.name),
-    );
     const clusterDiagram = buildMermaidDiagram(
       cluster.objects, cluster.internalEdges, undefined, objectsWithPages,
     );
@@ -310,9 +309,12 @@ export function buildIndexPage(
       .sort((a, b) => (topoIndex.get(b.name) ?? 0) - (topoIndex.get(a.name) ?? 0));
     for (const obj of linkedObjects) {
       const summary = summaries?.[obj.name] || obj.description || "";
+      const nameHtml = objectsWithPages.has(obj.name)
+        ? `<a href="${linkPrefix}${obj.name}.html">${escapeHtml(obj.name)}</a>`
+        : `<strong>${escapeHtml(obj.name)}</strong>`;
       parts.push(`<div class="obj-card">`);
       parts.push(
-        `<div class="obj-header"><a href="${linkPrefix}${obj.name}.html">${escapeHtml(obj.name)}</a>`
+        `<div class="obj-header">${nameHtml}`
         + `<span class="obj-type">(${escapeHtml(obj.type)})</span></div>`,
       );
       if (summary) {
@@ -325,7 +327,7 @@ export function buildIndexPage(
   }
 
   // External dependencies (collapsed)
-  parts.push(renderExternalDepsHtml(externalDeps, knownObjects, linkPrefix));
+  parts.push(renderExternalDepsHtml(externalDeps, objectsWithPages, linkPrefix));
 
   return wrapHtmlPage(`Package ${packageName}`, parts.join("\n"));
 }
@@ -393,15 +395,7 @@ export function assembleHtmlWiki(
 ): Record<string, string> {
   const pages: Record<string, string> = {};
 
-  // Collect all known object names for cross-linking
-  const knownObjects = new Set<string>();
-  for (const cluster of clusters) {
-    for (const obj of cluster.objects) {
-      knownObjects.add(obj.name);
-    }
-  }
-
-  // Collect objects that will have pages (for diagram click links)
+  // Collect objects that will have pages (for cross-linking and diagram click links)
   const objectsWithPages = new Set<string>();
   for (const cluster of clusters) {
     for (const obj of cluster.objects) {
@@ -416,7 +410,7 @@ export function assembleHtmlWiki(
         ?? (summaries?.[obj.name] ? `# ${obj.name}\n\n${summaries[obj.name]}` : undefined);
       if (!md) continue;
       let html = markdownToHtml(md);
-      html = linkifyObjectNames(html, knownObjects, obj.name);
+      html = linkifyObjectNames(html, objectsWithPages, obj.name);
       const objectEdges = cluster.internalEdges.filter(
         (e) => e.from === obj.name || e.to === obj.name,
       );
@@ -603,18 +597,7 @@ export function assembleHierarchicalHtmlWiki(
 ): Record<string, string> {
   const pages: Record<string, string> = {};
 
-  // Collect ALL known object names across all sub-packages for cross-linking
-  const allObjects = new Set<string>();
-  for (const c of rootClusters) {
-    for (const o of c.objects) allObjects.add(o.name);
-  }
-  for (const sp of subPackages) {
-    for (const c of sp.clusters) {
-      for (const o of c.objects) allObjects.add(o.name);
-    }
-  }
-
-  // Collect objects that will have pages (for diagram click links)
+  // Collect objects that will have pages (for cross-linking and diagram click links)
   const rootObjectsWithPages = new Set<string>();
   for (const cluster of rootClusters) {
     for (const obj of cluster.objects) {
@@ -629,7 +612,7 @@ export function assembleHierarchicalHtmlWiki(
         ?? (rootSummaries[obj.name] ? `# ${obj.name}\n\n${rootSummaries[obj.name]}` : undefined);
       if (!md) continue;
       let html = markdownToHtml(md);
-      html = linkifyObjectNames(html, allObjects, obj.name);
+      html = linkifyObjectNames(html, rootObjectsWithPages, obj.name);
       const objectEdges = cluster.internalEdges.filter(
         (e) => e.from === obj.name || e.to === obj.name,
       );
@@ -660,7 +643,7 @@ export function assembleHierarchicalHtmlWiki(
           ?? (sp.summaries[obj.name] ? `# ${obj.name}\n\n${sp.summaries[obj.name]}` : undefined);
         if (!md) continue;
         let html = markdownToHtml(md);
-        html = linkifyObjectNames(html, allObjects, obj.name);
+        html = linkifyObjectNames(html, spObjectsWithPages, obj.name);
         const objectEdges = cluster.internalEdges.filter(
           (e) => e.from === obj.name || e.to === obj.name,
         );
@@ -703,9 +686,12 @@ export function assembleHierarchicalHtmlWiki(
         .sort((a, b) => (topoIndex.get(b.name) ?? 0) - (topoIndex.get(a.name) ?? 0));
       for (const obj of linkedObjects) {
         const summary = rootSummaries[obj.name] || obj.description || "";
+        const nameHtml = rootObjectsWithPages.has(obj.name)
+          ? `<a href="${obj.name}.html">${escapeHtml(obj.name)}</a>`
+          : `<strong>${escapeHtml(obj.name)}</strong>`;
         rootParts.push(`<div class="obj-card">`);
         rootParts.push(
-          `<div class="obj-header"><a href="${obj.name}.html">${escapeHtml(obj.name)}</a>`
+          `<div class="obj-header">${nameHtml}`
           + `<span class="obj-type">(${escapeHtml(obj.type)})</span></div>`,
         );
         if (summary) {
@@ -734,7 +720,7 @@ export function assembleHierarchicalHtmlWiki(
   }
 
   // External deps (collapsed)
-  rootParts.push(renderExternalDepsHtml(rootExternalDeps));
+  rootParts.push(renderExternalDepsHtml(rootExternalDeps, rootObjectsWithPages));
 
   pages["index.html"] = wrapHtmlPage(`Package ${packageName}`, rootParts.join("\n"));
   return pages;

@@ -115,9 +115,9 @@ interface TemplateConfig {
 }
 
 const TEMPLATE_CONFIGS: Record<string, TemplateConfig> = {
-  default: { name: "Default", detail: "default", maxWords: 1500, maxOutputTokens: 8192 },
-  minimal: { name: "Minimal", detail: "minimal", maxWords: 500, maxOutputTokens: 4096 },
-  detailed: { name: "Detailed", detail: "detailed", maxWords: 3000, maxOutputTokens: 16384 },
+  default: { name: "Default", detail: "default", maxWords: 800, maxOutputTokens: 4096 },
+  minimal: { name: "Minimal", detail: "minimal", maxWords: 400, maxOutputTokens: 2048 },
+  detailed: { name: "Detailed", detail: "detailed", maxWords: 1500, maxOutputTokens: 8192 },
 };
 
 type ObjectCategory = "class" | "report" | "cds";
