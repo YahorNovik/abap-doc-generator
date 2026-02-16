@@ -1,6 +1,6 @@
 import { buildDag, createConnectedClient } from "./dag-builder";
 import { generateDocumentation } from "./doc-generator";
-import { generatePackageDocumentation, triagePackage, suggestStandaloneAssignments } from "./package-doc-generator";
+import { generatePackageDocumentation, triagePackage } from "./package-doc-generator";
 import { handleChat } from "./chat-handler";
 import { listPackageObjects } from "./package-graph";
 import { exportPdf, exportDocx } from "./exporter";
@@ -22,8 +22,6 @@ async function main(): Promise<void> {
       process.stderr.write("Error: markdown is required for export commands\n");
       process.exit(1);
     }
-  } else if (input.command === "suggest-standalone-assignments") {
-    // No SAP connection needed — pure LLM call
   } else if (!input.systemUrl || (!input.objectName && !input.packageName)) {
     process.stderr.write("Error: systemUrl and objectName (or packageName) are required\n");
     process.exit(1);
@@ -78,13 +76,6 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       const result = await generatePackageDocumentation(input);
-      process.stdout.write(JSON.stringify(result));
-    } else if (input.command === "suggest-standalone-assignments") {
-      if (!input.summaryLlm) {
-        process.stderr.write("Error: summaryLlm config is required for suggest-standalone-assignments\n");
-        process.exit(1);
-      }
-      const result = await suggestStandaloneAssignments(input);
       process.stdout.write(JSON.stringify(result));
     } else if (input.command === "generate-doc") {
       if (!input.summaryLlm || !input.docLlm) {

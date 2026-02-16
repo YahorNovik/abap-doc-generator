@@ -366,26 +366,6 @@ public class DagRunner {
         return sb.toString();
     }
 
-    public String suggestStandaloneAssignments(
-            String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
-            String standaloneObjectsJson, String clustersJson,
-            Consumer<String> progressCallback) throws IOException, InterruptedException {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"command\":\"suggest-standalone-assignments\"");
-        sb.append(",\"summaryLlm\":{");
-        sb.append("\"provider\":\"").append(escapeJson(summaryProvider)).append("\"");
-        sb.append(",\"apiKey\":\"").append(escapeJson(summaryApiKey)).append("\"");
-        sb.append(",\"model\":\"").append(escapeJson(summaryModel)).append("\"");
-        if (summaryBaseUrl != null && !summaryBaseUrl.isEmpty()) {
-            sb.append(",\"baseUrl\":\"").append(escapeJson(summaryBaseUrl)).append("\"");
-        }
-        sb.append("}");
-        sb.append(",\"standaloneObjects\":").append(standaloneObjectsJson);
-        sb.append(",\"clusters\":").append(clustersJson);
-        sb.append("}");
-        return runScript(sb.toString(), progressCallback);
-    }
-
     public String exportPdf(String markdown, String title,
                             Consumer<String> progressCallback) throws IOException, InterruptedException {
         String input = buildExportInputJson("export-pdf", markdown, title);

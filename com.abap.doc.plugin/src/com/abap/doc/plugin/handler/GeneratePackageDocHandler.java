@@ -269,57 +269,6 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         String[] fullDocObjects = triageDialog.getFullDocObjects();
         PluginConsole.println(fullDocObjects.length + " objects selected for full documentation.");
 
-        // Check if we should show the standalone reassignment dialog
-        // Find named clusters (not "Standalone Objects") and standalone objects
-        List<StandaloneReassignDialog.ClusterInfo> namedClusters = new ArrayList<>();
-        List<StandaloneReassignDialog.StandaloneItem> standaloneItems2 = new ArrayList<>();
-        String[] namedClusterNames = extractNamedClusters(precomputedClusterAssignments, precomputedClusterSummaries, namedClusters);
-
-        if (namedClusterNames.length > 0 && precomputedClusterAssignments != null) {
-            // Find objects in "Standalone Objects" cluster
-            for (Map.Entry<String, String[]> entry : precomputedClusterAssignments.entrySet()) {
-                String key = entry.getKey();
-                // Match "Standalone Objects" or "SUBPKG::Standalone Objects"
-                String clusterName = key.contains("::") ? key.substring(key.indexOf("::") + 2) : key;
-                if ("Standalone Objects".equals(clusterName)) {
-                    for (String objName : entry.getValue()) {
-                        String summary = precomputedSummaries != null ? precomputedSummaries.getOrDefault(objName, "") : "";
-                        String type = "";
-                        for (TriageReviewDialog.TriageObjectItem ti : triageItems) {
-                            if (ti.name.equals(objName)) {
-                                type = ti.type;
-                                if (summary.isEmpty()) summary = ti.summary;
-                                break;
-                            }
-                        }
-                        standaloneItems2.add(new StandaloneReassignDialog.StandaloneItem(objName, type, summary));
-                    }
-                }
-            }
-        }
-
-        // Apply standalone reassignments to cluster assignments
-        final Map<String, String[]> finalClusterAssignments;
-        if (!standaloneItems2.isEmpty() && namedClusterNames.length > 0) {
-            StandaloneReassignDialog reassignDialog = new StandaloneReassignDialog(
-                shell, standaloneItems2, namedClusterNames, namedClusters,
-                summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl);
-            if (reassignDialog.open() == Window.OK) {
-                Map<String, String> reassignments = reassignDialog.getReassignments();
-                if (!reassignments.isEmpty()) {
-                    finalClusterAssignments = applyReassignments(precomputedClusterAssignments, reassignments);
-                    PluginConsole.println(reassignments.size() + " standalone objects reassigned to groups.");
-                } else {
-                    finalClusterAssignments = precomputedClusterAssignments;
-                }
-            } else {
-                finalClusterAssignments = precomputedClusterAssignments;
-                PluginConsole.println("Standalone reassignment skipped.");
-            }
-        } else {
-            finalClusterAssignments = precomputedClusterAssignments;
-        }
-
         // Phase 3: Generate documentation
         Job genJob = new Job("Generating package documentation for " + packageName) {
             @Override
@@ -341,7 +290,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         fullDocObjects,
                         precomputedSummaries,
                         precomputedClusterSummaries,
-                        finalClusterAssignments,
+                        precomputedClusterAssignments,
                         line -> {
                             genMonitor.subTask(line);
                             PluginConsole.println(line);
@@ -902,96 +851,5 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             result.add(sb.toString());
         }
         return result.toArray(new String[0]);
-    }
-
-    /**
-     * Extracts named cluster names (excluding "Standalone Objects") from precomputed assignments.
-     * Also populates the clusterInfos list for the reassignment dialog.
-     */
-    private static String[] extractNamedClusters(
-            Map<String, String[]> clusterAssignments,
-            Map<String, String> clusterSummaries,
-            List<StandaloneReassignDialog.ClusterInfo> clusterInfos) {
-        if (clusterAssignments == null) return new String[0];
-        List<String> names = new ArrayList<>();
-        for (String key : clusterAssignments.keySet()) {
-            String clusterName = key.contains("::") ? key.substring(key.indexOf("::") + 2) : key;
-            if (!"Standalone Objects".equals(clusterName)) {
-                if (!names.contains(clusterName)) {
-                    names.add(clusterName);
-                    String summary = "";
-                    if (clusterSummaries != null) {
-                        summary = clusterSummaries.getOrDefault(key, clusterSummaries.getOrDefault(clusterName, ""));
-                    }
-                    clusterInfos.add(new StandaloneReassignDialog.ClusterInfo(clusterName, summary));
-                }
-            }
-        }
-        return names.toArray(new String[0]);
-    }
-
-    /**
-     * Applies standalone object reassignments to the cluster assignments map.
-     * Moves objects from "Standalone Objects" clusters to their assigned target clusters.
-     */
-    private static Map<String, String[]> applyReassignments(
-            Map<String, String[]> original,
-            Map<String, String> reassignments) {
-        if (original == null || reassignments.isEmpty()) return original;
-
-        Map<String, List<String>> mutable = new LinkedHashMap<>();
-        for (Map.Entry<String, String[]> entry : original.entrySet()) {
-            List<String> list = new ArrayList<>();
-            for (String name : entry.getValue()) {
-                list.add(name);
-            }
-            mutable.put(entry.getKey(), list);
-        }
-
-        for (Map.Entry<String, String> reassignment : reassignments.entrySet()) {
-            String objName = reassignment.getKey();
-            String targetCluster = reassignment.getValue();
-
-            // Remove from Standalone Objects
-            for (Map.Entry<String, List<String>> entry : mutable.entrySet()) {
-                String key = entry.getKey();
-                String clusterName = key.contains("::") ? key.substring(key.indexOf("::") + 2) : key;
-                if ("Standalone Objects".equals(clusterName)) {
-                    entry.getValue().remove(objName);
-                }
-            }
-
-            // Add to target cluster (find matching key)
-            boolean added = false;
-            for (Map.Entry<String, List<String>> entry : mutable.entrySet()) {
-                String key = entry.getKey();
-                String clusterName = key.contains("::") ? key.substring(key.indexOf("::") + 2) : key;
-                if (clusterName.equals(targetCluster)) {
-                    entry.getValue().add(objName);
-                    added = true;
-                    break;
-                }
-            }
-            if (!added) {
-                // Target cluster not found — put it back in standalone
-                for (Map.Entry<String, List<String>> entry : mutable.entrySet()) {
-                    String key = entry.getKey();
-                    String clusterName = key.contains("::") ? key.substring(key.indexOf("::") + 2) : key;
-                    if ("Standalone Objects".equals(clusterName)) {
-                        entry.getValue().add(objName);
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Convert back to Map<String, String[]>, removing empty clusters
-        Map<String, String[]> result = new LinkedHashMap<>();
-        for (Map.Entry<String, List<String>> entry : mutable.entrySet()) {
-            if (!entry.getValue().isEmpty()) {
-                result.put(entry.getKey(), entry.getValue().toArray(new String[0]));
-            }
-        }
-        return result;
     }
 }
