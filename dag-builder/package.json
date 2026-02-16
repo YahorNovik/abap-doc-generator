@@ -2,6 +2,13 @@
   "name": "abap-dag-builder",
   "version": "1.0.0",
   "description": "ABAP dependency DAG builder using abaplint parser",
+  "license": "MIT",
+  "author": "Yahor Novik",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YahorNovik/abap-doc-generator.git"
+  },
+  "homepage": "https://github.com/YahorNovik/abap-doc-generator",
   "main": "dist/index.js",
   "scripts": {
     "prebuild": "node scripts/generate-fonts.js",

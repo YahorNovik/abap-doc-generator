@@ -21,6 +21,10 @@ target/
 *.iml
 .vscode/
 
+# Environment
+.env
+.env.*
+
 # OS
 .DS_Store
 Thumbs.db

@@ -59,7 +59,7 @@ jobs:
             <h2>Installation</h2>
             <ol>
               <li>In Eclipse, go to <b>Help > Install New Software...</b></li>
-              <li>Add this URL as a repository: <code>https://yahornovik.github.io/abap-doc-generator/</code></li>
+              <li>Add this URL as a repository: <code>https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/</code></li>
               <li>Select "ABAP Documentation Generator" and install</li>
             </ol>
             <h2>Prerequisites</h2>
