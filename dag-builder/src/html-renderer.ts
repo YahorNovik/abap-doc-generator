@@ -1006,7 +1006,7 @@ export function renderPackageDiagramHtml(
   if (graph.externalDependencies.length > 0) {
     parts.push(`<h2>External Dependencies</h2>`);
     parts.push(`<table>`);
-    parts.push(`<tr><th>Used By</th><th>Depends On</th><th>Type</th><th>Members</th></tr>`);
+    parts.push(`<tr><th>Package Object</th><th>External Dependency</th><th>Type</th><th>Members</th></tr>`);
     for (const dep of graph.externalDependencies.slice(0, 50)) {
       const members = dep.references.map((r) => r.memberName).join(", ") || "\u2014";
       parts.push(`<tr><td><code>${escapeHtml(dep.from)}</code></td>`
