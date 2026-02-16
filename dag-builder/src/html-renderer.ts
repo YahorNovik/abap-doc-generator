@@ -965,37 +965,41 @@ export function renderPackageDiagramHtml(
   graph: PackageGraph,
   clusters: Cluster[],
 ): string {
+  // Separate real clusters (have internal edges) from standalone objects
+  const realClusters = clusters.filter((c) => c.internalEdges.length > 0);
+  const standaloneObjects = clusters
+    .filter((c) => c.internalEdges.length === 0)
+    .flatMap((c) => c.objects);
+
   const parts: string[] = [];
   parts.push(`<h1>Package Diagram: ${escapeHtml(packageName)}</h1>`);
   parts.push(`<p>${graph.objects.length} objects, ${graph.internalEdges.length} internal edges, `
-    + `${graph.externalDependencies.length} external dependencies, ${clusters.length} cluster(s)</p>`);
-
-  // Full package diagram
-  if (graph.internalEdges.length > 0) {
-    const allObjects = graph.objects.map((o) => ({ name: o.name, type: o.type }));
-    const fullDiagram = buildMermaidDiagram(allObjects, graph.internalEdges);
-    if (fullDiagram) {
-      parts.push(`<h2>Full Package Graph</h2>`);
-      parts.push(`<div class="mermaid">\n${fullDiagram}\n</div>`);
-    }
-  }
+    + `${graph.externalDependencies.length} external dependencies</p>`);
 
   // Per-cluster diagrams
-  if (clusters.length > 0) {
-    parts.push(`<h2>Clusters</h2>`);
-    for (const cluster of clusters) {
-      parts.push(`<h3>${escapeHtml(cluster.name)} (${cluster.objects.length} objects)</h3>`);
-      const clusterObjs = cluster.objects.map((o) => ({ name: o.name, type: o.type }));
-      const clusterDiagram = buildMermaidDiagram(clusterObjs, cluster.internalEdges);
-      if (clusterDiagram) {
-        parts.push(`<div class="mermaid">\n${clusterDiagram}\n</div>`);
-      }
-      parts.push(`<ul>`);
-      for (const obj of cluster.objects) {
-        parts.push(`<li><code>${escapeHtml(obj.name)}</code> (${escapeHtml(obj.type)})</li>`);
-      }
-      parts.push(`</ul>`);
+  for (const cluster of realClusters) {
+    parts.push(`<h2>${escapeHtml(cluster.name)} (${cluster.objects.length} objects)</h2>`);
+    const clusterObjs = cluster.objects.map((o) => ({ name: o.name, type: o.type }));
+    const clusterDiagram = buildMermaidDiagram(clusterObjs, cluster.internalEdges);
+    if (clusterDiagram) {
+      parts.push(`<div class="mermaid">\n${clusterDiagram}\n</div>`);
     }
+    parts.push(`<ul>`);
+    for (const obj of cluster.objects) {
+      parts.push(`<li><code>${escapeHtml(obj.name)}</code> (${escapeHtml(obj.type)})${obj.description ? " \u2014 " + escapeHtml(obj.description) : ""}</li>`);
+    }
+    parts.push(`</ul>`);
+  }
+
+  // Standalone objects
+  if (standaloneObjects.length > 0) {
+    parts.push(`<h2>Standalone Objects (${standaloneObjects.length})</h2>`);
+    parts.push(`<p>Objects with no internal package dependencies.</p>`);
+    parts.push(`<ul>`);
+    for (const obj of standaloneObjects) {
+      parts.push(`<li><code>${escapeHtml(obj.name)}</code> (${escapeHtml(obj.type)})${obj.description ? " \u2014 " + escapeHtml(obj.description) : ""}</li>`);
+    }
+    parts.push(`</ul>`);
   }
 
   // External dependencies
