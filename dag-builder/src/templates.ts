@@ -139,13 +139,15 @@ export function resolveTemplate(
   templateType?: string,
   templateCustom?: string,
   objectType?: string,
+  maxWordsOverride?: number,
+  maxOutputTokensOverride?: number,
 ): DocTemplate {
   if (templateType === "custom" && templateCustom && templateCustom.trim().length > 0) {
     return {
       name: "Custom",
       sections: templateCustom.trim(),
-      maxWords: 3000,
-      maxOutputTokens: 8192,
+      maxWords: maxWordsOverride ?? 3000,
+      maxOutputTokens: maxOutputTokensOverride ?? 8192,
     };
   }
 

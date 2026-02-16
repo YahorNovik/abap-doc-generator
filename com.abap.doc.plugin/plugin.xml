@@ -10,7 +10,7 @@
         </category>
         <command
             id="com.abap.doc.command.buildDag"
-            name="Build Dependency Graph"
+            name="Show Dependency Diagram"
             categoryId="com.abap.doc.commands.category">
         </command>
         <command
@@ -68,44 +68,9 @@
             </command>
             <command
                 commandId="com.abap.doc.command.buildDag"
-                label="Build Dependency Graph"
+                label="Show Dependency Diagram"
                 style="push">
             </command>
-        </menuContribution>
-        <!-- Main menu bar -->
-        <menuContribution
-            allPopups="false"
-            locationURI="menu:org.eclipse.ui.main.menu?after=additions">
-            <menu
-                id="com.abap.doc.menu"
-                label="ABAP Doc">
-                <command
-                    commandId="com.abap.doc.command.generateDoc"
-                    label="Generate Documentation for Current Editor"
-                    style="push">
-                </command>
-                <command
-                    commandId="com.abap.doc.command.generatePackageDoc"
-                    label="Generate Package Documentation"
-                    style="push">
-                </command>
-                <command
-                    commandId="com.abap.doc.command.buildDag"
-                    label="Build Dependency Graph"
-                    style="push">
-                </command>
-                <separator name="com.abap.doc.menu.separator1" visible="true"/>
-                <command
-                    commandId="com.abap.doc.command.saveDoc"
-                    label="Save Documentation"
-                    style="push">
-                </command>
-                <command
-                    commandId="com.abap.doc.command.openChat"
-                    label="Open ABAP Doc View"
-                    style="push">
-                </command>
-            </menu>
         </menuContribution>
     </extension>
 

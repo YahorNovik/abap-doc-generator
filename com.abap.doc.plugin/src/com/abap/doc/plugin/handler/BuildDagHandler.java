@@ -11,18 +11,20 @@ import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.Job;
+import org.eclipse.jface.dialogs.InputDialog;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.preference.IPreferenceStore;
+import org.eclipse.jface.window.Window;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.handlers.HandlerUtil;
-import org.eclipse.ui.ide.IDE;
 
 import com.abap.doc.plugin.Activator;
 import com.abap.doc.plugin.PluginConsole;
+import com.abap.doc.plugin.chat.ChatView;
 import com.abap.doc.plugin.dag.DagRunner;
 import com.abap.doc.plugin.preferences.ConnectionPreferencePage;
 
@@ -45,8 +47,29 @@ public class BuildDagHandler extends AbstractHandler {
             return null;
         }
 
-        // Get object name from the active editor title
-        // ADT editor titles look like "[SYS] ZCL_MY_CLASS" — strip the system prefix
+        // Ask user for mode: Current Object or Package
+        String[] options = { "Current Object", "Package", "Cancel" };
+        MessageDialog modeDialog = new MessageDialog(shell,
+            "Show Dependency Diagram", null,
+            "Show dependency diagram for the current editor object or for an entire package?",
+            MessageDialog.QUESTION, options, 0);
+        int choice = modeDialog.open();
+
+        if (choice == 2 || choice == -1) {
+            return null; // Cancel
+        }
+
+        if (choice == 0) {
+            // Current Object mode
+            return handleObjectMode(event, shell, display, systemUrl, client, username, password);
+        } else {
+            // Package mode
+            return handlePackageMode(shell, display, store, systemUrl, client, username, password);
+        }
+    }
+
+    private Object handleObjectMode(ExecutionEvent event, Shell shell, Display display,
+                                     String systemUrl, String client, String username, String password) {
         String objectName = null;
         IEditorPart editor = HandlerUtil.getActiveEditor(event);
         if (editor != null) {
@@ -62,7 +85,6 @@ public class BuildDagHandler extends AbstractHandler {
             return null;
         }
 
-        // Determine object type from name
         String objectType = "CLAS";
         if (objectName.startsWith("ZIF_") || objectName.startsWith("YIF_")
             || objectName.startsWith("IF_")) {
@@ -72,40 +94,42 @@ public class BuildDagHandler extends AbstractHandler {
         final String fObjectName = objectName;
         final String fObjectType = objectType;
 
-        Job job = new Job("Building dependency graph for " + objectName) {
+        Job job = new Job("Building dependency diagram for " + objectName) {
             @Override
             protected IStatus run(IProgressMonitor monitor) {
-                monitor.beginTask("Building dependency graph for " + fObjectName, IProgressMonitor.UNKNOWN);
+                monitor.beginTask("Building dependency diagram for " + fObjectName, IProgressMonitor.UNKNOWN);
                 PluginConsole.clear();
                 PluginConsole.show();
-                PluginConsole.println("Building dependency graph for " + fObjectName + " (" + fObjectType + ")");
+                PluginConsole.println("Building dependency diagram for " + fObjectName + " (" + fObjectType + ")");
                 try {
                     DagRunner runner = new DagRunner();
-                    String resultJson = runner.buildDag(systemUrl, client, username, password,
+                    String resultJson = runner.renderDiagram(systemUrl, client, username, password,
                         fObjectName, fObjectType,
                         line -> {
                             monitor.subTask(line);
                             PluginConsole.println(line);
                         });
 
-                    // Pretty-print JSON (basic indentation)
-                    String prettyJson = prettyPrintJson(resultJson);
+                    String html = extractHtmlField(resultJson);
+                    if (html == null) {
+                        throw new Exception("No HTML returned from diagram builder");
+                    }
 
-                    // Write to temp file and open in editor
-                    File tempFile = File.createTempFile("dag-" + fObjectName + "-", ".json");
+                    // Write HTML to temp file for reference
+                    File tempFile = File.createTempFile("diagram-" + fObjectName + "-", ".html");
                     tempFile.deleteOnExit();
-                    Files.writeString(tempFile.toPath(), prettyJson, StandardCharsets.UTF_8);
+                    Files.writeString(tempFile.toPath(), html, StandardCharsets.UTF_8);
+                    PluginConsole.println("Diagram HTML written to " + tempFile.getAbsolutePath());
 
                     display.asyncExec(() -> {
                         try {
                             IWorkbenchPage page = PlatformUI.getWorkbench()
                                 .getActiveWorkbenchWindow().getActivePage();
-                            IDE.openEditorOnFileStore(page,
-                                org.eclipse.core.filesystem.EFS.getLocalFileSystem()
-                                    .fromLocalFile(tempFile));
+                            ChatView view = (ChatView) page.showView(ChatView.ID);
+                            view.showHtml(html);
                         } catch (Exception e) {
                             MessageDialog.openError(shell, "ABAP Doc Generator",
-                                "Failed to open result: " + e.getMessage());
+                                "Failed to display diagram: " + e.getMessage());
                         }
                     });
 
@@ -113,8 +137,8 @@ public class BuildDagHandler extends AbstractHandler {
                 } catch (Exception e) {
                     display.asyncExec(() ->
                         MessageDialog.openError(shell, "ABAP Doc Generator",
-                            "Failed to build dependency graph: " + e.getMessage()));
-                    return Status.error("DAG build failed", e);
+                            "Failed to build dependency diagram: " + e.getMessage()));
+                    return Status.error("Diagram build failed", e);
                 } finally {
                     monitor.done();
                 }
@@ -122,73 +146,108 @@ public class BuildDagHandler extends AbstractHandler {
         };
         job.setUser(true);
         job.schedule();
+        return null;
+    }
 
+    private Object handlePackageMode(Shell shell, Display display, IPreferenceStore store,
+                                      String systemUrl, String client, String username, String password) {
+        InputDialog dlg = new InputDialog(shell, "Package Dependency Diagram",
+            "Enter the ABAP package name:", "", null);
+        if (dlg.open() != Window.OK) {
+            return null;
+        }
+        String packageName = dlg.getValue().trim().toUpperCase();
+        if (packageName.isEmpty()) {
+            return null;
+        }
+
+        int maxSubPackageDepth = store.getInt(ConnectionPreferencePage.PREF_MAX_SUBPACKAGE_DEPTH);
+
+        Job job = new Job("Building dependency diagram for package " + packageName) {
+            @Override
+            protected IStatus run(IProgressMonitor monitor) {
+                monitor.beginTask("Building dependency diagram for " + packageName, IProgressMonitor.UNKNOWN);
+                PluginConsole.clear();
+                PluginConsole.show();
+                PluginConsole.println("Building dependency diagram for package " + packageName);
+                try {
+                    DagRunner runner = new DagRunner();
+                    String resultJson = runner.renderPackageDiagram(systemUrl, client, username, password,
+                        packageName, maxSubPackageDepth,
+                        line -> {
+                            monitor.subTask(line);
+                            PluginConsole.println(line);
+                        });
+
+                    String html = extractHtmlField(resultJson);
+                    if (html == null) {
+                        throw new Exception("No HTML returned from diagram builder");
+                    }
+
+                    // Write HTML to temp file for reference
+                    File tempFile = File.createTempFile("diagram-" + packageName + "-", ".html");
+                    tempFile.deleteOnExit();
+                    Files.writeString(tempFile.toPath(), html, StandardCharsets.UTF_8);
+                    PluginConsole.println("Diagram HTML written to " + tempFile.getAbsolutePath());
+
+                    display.asyncExec(() -> {
+                        try {
+                            IWorkbenchPage page = PlatformUI.getWorkbench()
+                                .getActiveWorkbenchWindow().getActivePage();
+                            ChatView view = (ChatView) page.showView(ChatView.ID);
+                            view.showHtml(html);
+                        } catch (Exception e) {
+                            MessageDialog.openError(shell, "ABAP Doc Generator",
+                                "Failed to display diagram: " + e.getMessage());
+                        }
+                    });
+
+                    return Status.OK_STATUS;
+                } catch (Exception e) {
+                    display.asyncExec(() ->
+                        MessageDialog.openError(shell, "ABAP Doc Generator",
+                            "Failed to build package diagram: " + e.getMessage()));
+                    return Status.error("Package diagram build failed", e);
+                } finally {
+                    monitor.done();
+                }
+            }
+        };
+        job.setUser(true);
+        job.schedule();
         return null;
     }
 
     /**
-     * Minimal JSON pretty-printer (no external dependencies).
+     * Extracts the "html" field from the JSON result.
      */
-    private static String prettyPrintJson(String json) {
+    private static String extractHtmlField(String json) {
+        String key = "\"html\":\"";
+        int start = json.indexOf(key);
+        if (start == -1) return null;
+        start += key.length();
+
         StringBuilder sb = new StringBuilder();
-        int indent = 0;
-        boolean inString = false;
         boolean escaped = false;
-
-        for (int i = 0; i < json.length(); i++) {
+        for (int i = start; i < json.length(); i++) {
             char c = json.charAt(i);
-
             if (escaped) {
-                sb.append(c);
+                switch (c) {
+                    case 'n': sb.append('\n'); break;
+                    case 't': sb.append('\t'); break;
+                    case 'r': sb.append('\r'); break;
+                    case '"': sb.append('"'); break;
+                    case '\\': sb.append('\\'); break;
+                    case '/': sb.append('/'); break;
+                    default: sb.append('\\').append(c);
+                }
                 escaped = false;
-                continue;
-            }
-
-            if (c == '\\' && inString) {
-                sb.append(c);
+            } else if (c == '\\') {
                 escaped = true;
-                continue;
-            }
-
-            if (c == '"') {
-                inString = !inString;
+            } else if (c == '"') {
+                break;
+            } else {
                 sb.append(c);
-                continue;
-            }
-
-            if (inString) {
-                sb.append(c);
-                continue;
-            }
-
-            switch (c) {
-                case '{':
-                case '[':
-                    sb.append(c);
-                    sb.append('\n');
-                    indent++;
-                    sb.append("  ".repeat(indent));
-                    break;
-                case '}':
-                case ']':
-                    sb.append('\n');
-                    indent--;
-                    sb.append("  ".repeat(indent));
-                    sb.append(c);
-                    break;
-                case ',':
-                    sb.append(c);
-                    sb.append('\n');
-                    sb.append("  ".repeat(indent));
-                    break;
-                case ':':
-                    sb.append(c);
-                    sb.append(' ');
-                    break;
-                default:
-                    if (!Character.isWhitespace(c)) {
-                        sb.append(c);
-                    }
             }
         }
         return sb.toString();

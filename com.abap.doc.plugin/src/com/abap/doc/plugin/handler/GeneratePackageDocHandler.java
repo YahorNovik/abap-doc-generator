@@ -67,9 +67,22 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         // Token budget
         int maxTotalTokens = store.getInt(ConnectionPreferencePage.PREF_MAX_TOKENS);
 
-        // Documentation template
-        String templateType = store.getString(ConnectionPreferencePage.PREF_TEMPLATE);
-        String templateCustom = store.getString(ConnectionPreferencePage.PREF_TEMPLATE_CUSTOM);
+        // Documentation template — resolve from stored templates
+        String templateType;
+        String templateCustom;
+        int templateMaxWords = 0;
+        int templateMaxOutputTokens = 0;
+        TemplateManagerDialog.TemplateItem selectedTemplate = ConnectionPreferencePage.resolveSelectedTemplate(store);
+        if (selectedTemplate != null) {
+            templateType = "custom";
+            templateCustom = selectedTemplate.sections;
+            templateMaxWords = selectedTemplate.maxWords;
+            templateMaxOutputTokens = selectedTemplate.maxOutputTokens;
+        } else {
+            String selectedName = store.getString(ConnectionPreferencePage.PREF_TEMPLATE);
+            templateType = mapBuiltInName(selectedName);
+            templateCustom = "";
+        }
 
         // Sub-package depth
         int maxSubPackageDepth = store.getInt(ConnectionPreferencePage.PREF_MAX_SUBPACKAGE_DEPTH);
@@ -109,6 +122,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         final int fMaxTotalTokens = maxTotalTokens;
         final String fTemplateType = templateType;
         final String fTemplateCustom = templateCustom;
+        final int fTemplateMaxWords = templateMaxWords;
+        final int fTemplateMaxOutputTokens = templateMaxOutputTokens;
         final String fUserContext = userContext;
         final int fMaxSubPackageDepth = maxSubPackageDepth;
 
@@ -146,7 +161,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         systemUrl, client, username, password,
                         summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
                         docProvider, docApiKey, docModel, docBaseUrl,
-                        fMaxTotalTokens, fTemplateType, fTemplateCustom, fUserContext,
+                        fMaxTotalTokens, fTemplateType, fTemplateCustom,
+                        fTemplateMaxWords, fTemplateMaxOutputTokens, fUserContext,
                         fMaxSubPackageDepth));
 
                     return Status.OK_STATUS;
@@ -175,7 +191,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             String systemUrl, String client, String username, String password,
             String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
             String docProvider, String docApiKey, String docModel, String docBaseUrl,
-            int maxTotalTokens, String templateType, String templateCustom, String userContext,
+            int maxTotalTokens, String templateType, String templateCustom,
+            int templateMaxWords, int templateMaxOutputTokens, String userContext,
             int maxSubPackageDepth) {
 
         ObjectSelectionDialog selDialog = new ObjectSelectionDialog(shell, objects);
@@ -226,7 +243,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         systemUrl, client, username, password,
                         summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
                         docProvider, docApiKey, docModel, docBaseUrl,
-                        maxTotalTokens, templateType, templateCustom, userContext,
+                        maxTotalTokens, templateType, templateCustom,
+                        templateMaxWords, templateMaxOutputTokens, userContext,
                         maxSubPackageDepth, excludedObjects,
                         precomputedSummaries, precomputedClusterSummaries, precomputedClusterAssignments));
 
@@ -254,7 +272,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             String systemUrl, String client, String username, String password,
             String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
             String docProvider, String docApiKey, String docModel, String docBaseUrl,
-            int maxTotalTokens, String templateType, String templateCustom, String userContext,
+            int maxTotalTokens, String templateType, String templateCustom,
+            int templateMaxWords, int templateMaxOutputTokens, String userContext,
             int maxSubPackageDepth, String[] excludedObjects,
             Map<String, String> precomputedSummaries,
             Map<String, String> precomputedClusterSummaries,
@@ -284,6 +303,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         docProvider, docApiKey, docModel, docBaseUrl,
                         maxTotalTokens,
                         templateType, templateCustom,
+                        templateMaxWords, templateMaxOutputTokens,
                         userContext,
                         maxSubPackageDepth,
                         excludedObjects,
@@ -417,6 +437,15 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             }
         }
         return sb.toString();
+    }
+
+    private static String mapBuiltInName(String name) {
+        if (name == null) return "default";
+        switch (name) {
+            case "Minimal": return "minimal";
+            case "Detailed": return "detailed";
+            default: return "default";
+        }
     }
 
     private static String extractJsonStringField(String json, String field) {

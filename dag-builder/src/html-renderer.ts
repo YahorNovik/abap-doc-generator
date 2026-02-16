@@ -1,5 +1,5 @@
 import { marked } from "marked";
-import { Cluster, DagEdge, DagNode, SubPackageNode, PackageObject } from "./types";
+import { Cluster, DagEdge, DagNode, DagResult, SubPackageNode, PackageObject, PackageGraph } from "./types";
 
 // ─── GitHub-flavored Markdown CSS ───
 
@@ -233,6 +233,20 @@ function wrapDiagramHtml(mermaidCode: string, open = true): string {
     + `</details>\n</div>`;
 }
 
+// ─── Overview extraction ───
+
+/**
+ * Extracts the Overview section text from full object documentation markdown.
+ * Returns the paragraph(s) under the "## Overview" heading, or undefined if not found.
+ */
+function extractOverview(markdown: string): string | undefined {
+  // Match "## Overview" (or "# Overview" after heading shift)
+  const overviewMatch = markdown.match(/^##?\s+Overview\s*\n([\s\S]*?)(?=\n##?\s|\n---|\n\*\*\w|$)/m);
+  if (!overviewMatch) return undefined;
+  const text = overviewMatch[1].trim();
+  return text.length > 0 ? text : undefined;
+}
+
 // ─── Summary card ───
 
 function renderSummaryCard(obj: PackageObject, summary: string): string {
@@ -308,7 +322,10 @@ export function buildIndexPage(
       .filter((o) => objectDocs?.[o.name] || summaries?.[o.name] || o.description)
       .sort((a, b) => (topoIndex.get(b.name) ?? 0) - (topoIndex.get(a.name) ?? 0));
     for (const obj of linkedObjects) {
-      const summary = summaries?.[obj.name] || obj.description || "";
+      // For objects with full docs, prefer the Overview section (more readable)
+      // over the raw technical summary
+      const overview = objectDocs?.[obj.name] ? extractOverview(objectDocs[obj.name]) : undefined;
+      const summary = overview || summaries?.[obj.name] || obj.description || "";
       const nameHtml = objectsWithPages.has(obj.name)
         ? `<a href="${linkPrefix}${obj.name}.html">${escapeHtml(obj.name)}</a>`
         : `<strong>${escapeHtml(obj.name)}</strong>`;
@@ -318,7 +335,12 @@ export function buildIndexPage(
         + `<span class="obj-type">(${escapeHtml(obj.type)})</span></div>`,
       );
       if (summary) {
-        parts.push(`<p class="obj-summary">${escapeHtml(summary)}</p>`);
+        if (overview) {
+          // Overview is markdown — render as HTML for inline formatting
+          parts.push(`<div class="obj-summary">${markdownToHtml(summary)}</div>`);
+        } else {
+          parts.push(`<p class="obj-summary">${escapeHtml(summary)}</p>`);
+        }
       }
       parts.push(`</div>`);
     }
@@ -873,4 +895,126 @@ function renderExternalDepsHtml(
   }
 
   return parts.join("\n");
+}
+
+// ─── Standalone diagram pages ───
+
+/**
+ * Renders a standalone HTML page showing the dependency diagram for a single object.
+ */
+export function renderObjectDiagramHtml(objectName: string, dagResult: DagResult): string {
+  const { nodes, edges, root } = dagResult;
+  const objects = nodes.map((n) => ({ name: n.name, type: n.type }));
+  const diagram = buildMermaidDiagram(objects, edges, root);
+
+  // Build edge lookup for stats
+  const depsOf = new Map<string, number>();
+  const usedByOf = new Map<string, number>();
+  for (const e of edges) {
+    depsOf.set(e.from, (depsOf.get(e.from) ?? 0) + 1);
+    usedByOf.set(e.to, (usedByOf.get(e.to) ?? 0) + 1);
+  }
+
+  const parts: string[] = [];
+  parts.push(`<h1>Dependency Diagram: ${escapeHtml(objectName)}</h1>`);
+  parts.push(`<p>${nodes.length} objects, ${edges.length} dependency edges. Root: <code>${escapeHtml(root)}</code></p>`);
+
+  if (diagram) {
+    parts.push(`<div class="mermaid">\n${diagram}\n</div>`);
+  } else {
+    parts.push(`<p><em>No dependencies found — this object has no connections to visualize.</em></p>`);
+  }
+
+  // Objects table
+  parts.push(`<h2>Objects</h2>`);
+  parts.push(`<table>`);
+  parts.push(`<tr><th>Name</th><th>Type</th><th>Custom</th><th>Dependencies</th><th>Used By</th></tr>`);
+  for (const node of nodes) {
+    const deps = depsOf.get(node.name) ?? 0;
+    const usedBy = usedByOf.get(node.name) ?? 0;
+    const isRoot = node.name === root;
+    const nameHtml = isRoot ? `<strong>${escapeHtml(node.name)}</strong>` : escapeHtml(node.name);
+    parts.push(`<tr><td>${nameHtml}</td><td>${escapeHtml(node.type)}</td>`
+      + `<td>${node.isCustom ? "Yes" : "No"}</td>`
+      + `<td>${deps}</td><td>${usedBy}</td></tr>`);
+  }
+  parts.push(`</table>`);
+
+  // Edge details
+  if (edges.length > 0) {
+    parts.push(`<h2>Dependency Details</h2>`);
+    parts.push(`<table>`);
+    parts.push(`<tr><th>From</th><th>To</th><th>Members Used</th></tr>`);
+    for (const edge of edges) {
+      const members = edge.references.map((r) => r.memberName).join(", ") || "\u2014";
+      parts.push(`<tr><td><code>${escapeHtml(edge.from)}</code></td>`
+        + `<td><code>${escapeHtml(edge.to)}</code></td>`
+        + `<td>${escapeHtml(members)}</td></tr>`);
+    }
+    parts.push(`</table>`);
+  }
+
+  return wrapHtmlPage("Dependency Diagram: " + objectName, parts.join("\n"));
+}
+
+/**
+ * Renders a standalone HTML page showing the package architecture diagram.
+ */
+export function renderPackageDiagramHtml(
+  packageName: string,
+  graph: PackageGraph,
+  clusters: Cluster[],
+): string {
+  const parts: string[] = [];
+  parts.push(`<h1>Package Diagram: ${escapeHtml(packageName)}</h1>`);
+  parts.push(`<p>${graph.objects.length} objects, ${graph.internalEdges.length} internal edges, `
+    + `${graph.externalDependencies.length} external dependencies, ${clusters.length} cluster(s)</p>`);
+
+  // Full package diagram
+  if (graph.internalEdges.length > 0) {
+    const allObjects = graph.objects.map((o) => ({ name: o.name, type: o.type }));
+    const fullDiagram = buildMermaidDiagram(allObjects, graph.internalEdges);
+    if (fullDiagram) {
+      parts.push(`<h2>Full Package Graph</h2>`);
+      parts.push(`<div class="mermaid">\n${fullDiagram}\n</div>`);
+    }
+  }
+
+  // Per-cluster diagrams
+  if (clusters.length > 0) {
+    parts.push(`<h2>Clusters</h2>`);
+    for (const cluster of clusters) {
+      parts.push(`<h3>${escapeHtml(cluster.name)} (${cluster.objects.length} objects)</h3>`);
+      const clusterObjs = cluster.objects.map((o) => ({ name: o.name, type: o.type }));
+      const clusterDiagram = buildMermaidDiagram(clusterObjs, cluster.internalEdges);
+      if (clusterDiagram) {
+        parts.push(`<div class="mermaid">\n${clusterDiagram}\n</div>`);
+      }
+      parts.push(`<ul>`);
+      for (const obj of cluster.objects) {
+        parts.push(`<li><code>${escapeHtml(obj.name)}</code> (${escapeHtml(obj.type)})</li>`);
+      }
+      parts.push(`</ul>`);
+    }
+  }
+
+  // External dependencies
+  if (graph.externalDependencies.length > 0) {
+    parts.push(`<h2>External Dependencies</h2>`);
+    parts.push(`<table>`);
+    parts.push(`<tr><th>Used By</th><th>Depends On</th><th>Type</th><th>Members</th></tr>`);
+    for (const dep of graph.externalDependencies.slice(0, 50)) {
+      const members = dep.references.map((r) => r.memberName).join(", ") || "\u2014";
+      parts.push(`<tr><td><code>${escapeHtml(dep.from)}</code></td>`
+        + `<td><code>${escapeHtml(dep.to)}</code></td>`
+        + `<td>${escapeHtml(dep.toType)}</td>`
+        + `<td>${escapeHtml(members)}</td></tr>`);
+    }
+    parts.push(`</table>`);
+    if (graph.externalDependencies.length > 50) {
+      parts.push(`<p><em>Showing first 50 of ${graph.externalDependencies.length} external dependencies.</em></p>`);
+    }
+  }
+
+  return wrapHtmlPage("Package Diagram: " + packageName, parts.join("\n"));
 }

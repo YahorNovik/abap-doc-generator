@@ -81,6 +81,8 @@ export interface DocInput {
   maxTotalTokens?: number;    // token budget for entire generation
   templateType?: "default" | "minimal" | "detailed" | "api-reference" | "custom";
   templateCustom?: string;    // user-provided template text (when templateType === "custom")
+  templateMaxWords?: number;   // override maxWords for custom templates
+  templateMaxOutputTokens?: number; // override maxOutputTokens for custom templates
   userContext?: string;        // additional context/notes from the user
 }
 
@@ -136,6 +138,8 @@ export interface PackageDocInput {
   maxTotalTokens?: number;
   templateType?: "default" | "minimal" | "detailed" | "custom";
   templateCustom?: string;
+  templateMaxWords?: number;
+  templateMaxOutputTokens?: number;
   userContext?: string;        // additional context/notes from the user
   maxSubPackageDepth?: number; // recursion depth for sub-packages (default 2)
   excludedObjects?: string[];  // object names to skip docs for (still in diagrams)

@@ -107,7 +107,7 @@ export async function generateDocumentation(input: DocInput): Promise<DocResult>
     }
 
     // Resolve template and set appropriate maxOutputTokens for doc LLM
-    const template = resolveTemplate(input.templateType, input.templateCustom, input.objectType);
+    const template = resolveTemplate(input.templateType, input.templateCustom, input.objectType, input.templateMaxWords, input.templateMaxOutputTokens);
     const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
     log(`Using template: ${template.name} (maxWords=${template.maxWords}, maxOutputTokens=${template.maxOutputTokens})`);
 

@@ -1,13 +1,26 @@
 package com.abap.doc.plugin.preferences;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.eclipse.jface.preference.ComboFieldEditor;
 import org.eclipse.jface.preference.FieldEditorPreferencePage;
+import org.eclipse.jface.preference.IPreferenceStore;
 import org.eclipse.jface.preference.IntegerFieldEditor;
 import org.eclipse.jface.preference.StringFieldEditor;
+import org.eclipse.jface.window.Window;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.events.SelectionAdapter;
+import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.layout.GridData;
+import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Composite;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
 
 import com.abap.doc.plugin.Activator;
+import com.abap.doc.plugin.handler.TemplateManagerDialog;
+import com.abap.doc.plugin.handler.TemplateManagerDialog.TemplateItem;
 
 public class ConnectionPreferencePage extends FieldEditorPreferencePage implements IWorkbenchPreferencePage {
 
@@ -32,9 +45,12 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
     // Token budget
     public static final String PREF_MAX_TOKENS = "maxTotalTokens";
 
-    // Documentation template
+    // Documentation template — selected template name
     public static final String PREF_TEMPLATE = "docTemplate";
+    // Legacy: single custom template text (kept for backward compatibility)
     public static final String PREF_TEMPLATE_CUSTOM = "docTemplateCustom";
+    // New: all templates as JSON array
+    public static final String PREF_CUSTOM_TEMPLATES = "customTemplates";
 
     // Save path
     public static final String PREF_SAVE_PATH = "docSavePath";
@@ -67,12 +83,7 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         { "GPT-4o Mini", "gpt-4o-mini" },
     };
 
-    private static final String[][] TEMPLATE_OPTIONS = {
-        { "Default", "default" },
-        { "Minimal", "minimal" },
-        { "Detailed", "detailed" },
-        { "Custom", "custom" },
-    };
+    private ComboFieldEditor templateCombo;
 
     public ConnectionPreferencePage() {
         super(GRID);
@@ -106,9 +117,22 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         maxTokensField.setValidRange(0, 10_000_000);
         addField(maxTokensField);
 
-        // Documentation template
-        addField(new ComboFieldEditor(PREF_TEMPLATE, "Documentation Template:", TEMPLATE_OPTIONS, getFieldEditorParent()));
-        addField(new StringFieldEditor(PREF_TEMPLATE_CUSTOM, "Custom Template (when Custom selected):", getFieldEditorParent()));
+        // Documentation template — dropdown with all available templates
+        String[][] templateOptions = buildTemplateOptions();
+        templateCombo = new ComboFieldEditor(PREF_TEMPLATE, "Documentation Template:", templateOptions, getFieldEditorParent());
+        addField(templateCombo);
+
+        // "Manage Templates..." button
+        Composite parent = getFieldEditorParent();
+        Button manageBtn = new Button(parent, SWT.PUSH);
+        manageBtn.setText("Manage Templates...");
+        manageBtn.setLayoutData(new GridData(SWT.LEFT, SWT.CENTER, false, false));
+        manageBtn.addSelectionListener(new SelectionAdapter() {
+            @Override
+            public void widgetSelected(SelectionEvent e) {
+                openTemplateManager();
+            }
+        });
 
         // Sub-package depth
         IntegerFieldEditor depthField = new IntegerFieldEditor(PREF_MAX_SUBPACKAGE_DEPTH, "Sub-Package Depth (0 = root only):", getFieldEditorParent());
@@ -119,7 +143,71 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         addField(new StringFieldEditor(PREF_SAVE_PATH, "Default Save Directory:", getFieldEditorParent()));
     }
 
+    private String[][] buildTemplateOptions() {
+        IPreferenceStore store = Activator.getDefault().getPreferenceStore();
+        String json = store.getString(PREF_CUSTOM_TEMPLATES);
+        List<TemplateItem> templates = TemplateManagerDialog.parseTemplatesJson(json);
+
+        // Always include the three built-in options
+        List<String[]> options = new ArrayList<>();
+        options.add(new String[] { "Default", "Default" });
+        options.add(new String[] { "Minimal", "Minimal" });
+        options.add(new String[] { "Detailed", "Detailed" });
+
+        // Add custom templates (skip built-in duplicates)
+        for (TemplateItem t : templates) {
+            if (!t.isBuiltIn && !t.name.isEmpty()) {
+                options.add(new String[] { t.name, t.name });
+            }
+        }
+
+        return options.toArray(new String[0][]);
+    }
+
+    private void openTemplateManager() {
+        IPreferenceStore store = Activator.getDefault().getPreferenceStore();
+        String json = store.getString(PREF_CUSTOM_TEMPLATES);
+        List<TemplateItem> existing = TemplateManagerDialog.parseTemplatesJson(json);
+
+        TemplateManagerDialog dialog = new TemplateManagerDialog(getShell(), existing);
+        if (dialog.open() == Window.OK) {
+            List<TemplateItem> updated = dialog.getTemplates();
+            String updatedJson = TemplateManagerDialog.templatesToJson(updated);
+            store.setValue(PREF_CUSTOM_TEMPLATES, updatedJson);
+
+            // Rebuild the template dropdown to include new custom templates
+            // FieldEditorPreferencePage doesn't support dynamic combo updates easily,
+            // so we inform the user
+            org.eclipse.jface.dialogs.MessageDialog.openInformation(getShell(), "Templates Updated",
+                "Templates saved. Re-open preferences to see new templates in the dropdown.");
+        }
+    }
+
     @Override
     public void init(IWorkbench workbench) {
+    }
+
+    /**
+     * Resolves the selected template to the sections text and config values.
+     * Used by handlers to get the actual template content.
+     * Returns null if it's a built-in template (let Node.js side handle resolution).
+     */
+    public static TemplateItem resolveSelectedTemplate(IPreferenceStore store) {
+        String selectedName = store.getString(PREF_TEMPLATE);
+        if (selectedName == null || selectedName.isEmpty()) return null;
+
+        // Check if it's a standard built-in name (let the TS side handle these by default)
+        // But the user might have customized even built-in templates
+        String json = store.getString(PREF_CUSTOM_TEMPLATES);
+        List<TemplateItem> templates = TemplateManagerDialog.parseTemplatesJson(json);
+
+        for (TemplateItem t : templates) {
+            if (t.name.equals(selectedName)) {
+                return t;
+            }
+        }
+
+        // Not found in stored templates — it's a built-in with no customization
+        return null;
     }
 }

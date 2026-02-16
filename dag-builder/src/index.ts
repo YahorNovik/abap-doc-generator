@@ -1,9 +1,10 @@
-import { buildDag, createConnectedClient } from "./dag-builder";
+import { buildDag, createConnectedClient, fetchSourceForNodes } from "./dag-builder";
 import { generateDocumentation } from "./doc-generator";
 import { generatePackageDocumentation, triagePackage } from "./package-doc-generator";
 import { handleChat } from "./chat-handler";
-import { listPackageObjects } from "./package-graph";
+import { listPackageObjects, fetchPackageObjects, buildPackageGraph, detectClusters } from "./package-graph";
 import { exportPdf, exportDocx } from "./exporter";
+import { renderObjectDiagramHtml, renderPackageDiagramHtml } from "./html-renderer";
 import { ListObjectsResult } from "./types";
 
 async function main(): Promise<void> {
@@ -84,6 +85,29 @@ async function main(): Promise<void> {
       }
       const result = await generateDocumentation(input);
       process.stdout.write(JSON.stringify(result));
+    } else if (input.command === "render-diagram") {
+      if (input.packageName) {
+        // Package mode
+        const client = await createConnectedClient(
+          input.systemUrl, input.username, input.password, input.client,
+        );
+        try {
+          const errors: string[] = [];
+          const objects = await fetchPackageObjects(client, input.packageName, errors);
+          const sources = await fetchSourceForNodes(client, objects, errors);
+          const graph = buildPackageGraph(objects, sources, errors);
+          const { clusters } = detectClusters(graph);
+          const html = renderPackageDiagramHtml(input.packageName, graph, clusters);
+          process.stdout.write(JSON.stringify({ html }));
+        } finally {
+          try { await client.disconnect(); } catch { /* ignore */ }
+        }
+      } else {
+        // Single object mode
+        const dagResult = await buildDag(input);
+        const html = renderObjectDiagramHtml(input.objectName, dagResult);
+        process.stdout.write(JSON.stringify({ html }));
+      }
     } else if (input.command === "chat") {
       if (!input.docLlm) {
         process.stderr.write("Error: docLlm config is required for chat\n");

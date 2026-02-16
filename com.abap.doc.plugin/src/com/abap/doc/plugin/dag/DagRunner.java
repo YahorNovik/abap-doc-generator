@@ -58,13 +58,14 @@ public class DagRunner {
                               String docProvider, String docApiKey, String docModel, String docBaseUrl,
                               int maxTotalTokens,
                               String templateType, String templateCustom,
+                              int templateMaxWords, int templateMaxOutputTokens,
                               String userContext,
                               Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildDocInputJson(systemUrl, client, username, password, objectName, objectType,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
             docProvider, docApiKey, docModel, docBaseUrl, maxTotalTokens,
-            templateType, templateCustom, userContext);
+            templateType, templateCustom, templateMaxWords, templateMaxOutputTokens, userContext);
         return runScript(input, progressCallback);
     }
 
@@ -94,6 +95,7 @@ public class DagRunner {
                                      String docProvider, String docApiKey, String docModel, String docBaseUrl,
                                      int maxTotalTokens,
                                      String templateType, String templateCustom,
+                                     int templateMaxWords, int templateMaxOutputTokens,
                                      String userContext,
                                      int maxSubPackageDepth,
                                      String[] excludedObjects,
@@ -106,8 +108,24 @@ public class DagRunner {
         String input = buildPackageDocInputJson(systemUrl, client, username, password, packageName,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
             docProvider, docApiKey, docModel, docBaseUrl, maxTotalTokens,
-            templateType, templateCustom, userContext, maxSubPackageDepth, excludedObjects,
+            templateType, templateCustom, templateMaxWords, templateMaxOutputTokens,
+            userContext, maxSubPackageDepth, excludedObjects,
             fullDocObjects, precomputedSummaries, precomputedClusterSummaries, precomputedClusterAssignments);
+        return runScript(input, progressCallback);
+    }
+
+    public String renderDiagram(String systemUrl, String client, String username, String password,
+                                String objectName, String objectType,
+                                Consumer<String> progressCallback) throws IOException, InterruptedException {
+        String input = buildRenderDiagramInputJson(systemUrl, client, username, password, objectName, objectType);
+        return runScript(input, progressCallback);
+    }
+
+    public String renderPackageDiagram(String systemUrl, String client, String username, String password,
+                                        String packageName, int maxSubPackageDepth,
+                                        Consumer<String> progressCallback) throws IOException, InterruptedException {
+        String input = buildRenderPackageDiagramInputJson(systemUrl, client, username, password,
+            packageName, maxSubPackageDepth);
         return runScript(input, progressCallback);
     }
 
@@ -166,6 +184,7 @@ public class DagRunner {
                                              String docProvider, String docApiKey, String docModel, String docBaseUrl,
                                              int maxTotalTokens,
                                              String templateType, String templateCustom,
+                                             int templateMaxWords, int templateMaxOutputTokens,
                                              String userContext) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-doc\"");
@@ -199,6 +218,12 @@ public class DagRunner {
         }
         if (templateCustom != null && !templateCustom.isEmpty()) {
             sb.append(",\"templateCustom\":\"").append(escapeJson(templateCustom)).append("\"");
+        }
+        if (templateMaxWords > 0) {
+            sb.append(",\"templateMaxWords\":").append(templateMaxWords);
+        }
+        if (templateMaxOutputTokens > 0) {
+            sb.append(",\"templateMaxOutputTokens\":").append(templateMaxOutputTokens);
         }
         if (userContext != null && !userContext.isEmpty()) {
             sb.append(",\"userContext\":\"").append(escapeJson(userContext)).append("\"");
@@ -265,6 +290,7 @@ public class DagRunner {
                                                     String docProvider, String docApiKey, String docModel, String docBaseUrl,
                                                     int maxTotalTokens,
                                                     String templateType, String templateCustom,
+                                                    int templateMaxWords, int templateMaxOutputTokens,
                                                     String userContext,
                                                     int maxSubPackageDepth,
                                                     String[] excludedObjects,
@@ -303,6 +329,12 @@ public class DagRunner {
         }
         if (templateCustom != null && !templateCustom.isEmpty()) {
             sb.append(",\"templateCustom\":\"").append(escapeJson(templateCustom)).append("\"");
+        }
+        if (templateMaxWords > 0) {
+            sb.append(",\"templateMaxWords\":").append(templateMaxWords);
+        }
+        if (templateMaxOutputTokens > 0) {
+            sb.append(",\"templateMaxOutputTokens\":").append(templateMaxOutputTokens);
         }
         if (userContext != null && !userContext.isEmpty()) {
             sb.append(",\"userContext\":\"").append(escapeJson(userContext)).append("\"");
@@ -431,6 +463,37 @@ public class DagRunner {
             sb.append(",\"baseUrl\":\"").append(escapeJson(docBaseUrl)).append("\"");
         }
         sb.append("}}");
+        return sb.toString();
+    }
+
+    private static String buildRenderDiagramInputJson(String systemUrl, String client, String username,
+                                                       String password, String objectName, String objectType) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"command\":\"render-diagram\"");
+        sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
+        sb.append(",\"client\":\"").append(escapeJson(client)).append("\"");
+        sb.append(",\"username\":\"").append(escapeJson(username)).append("\"");
+        sb.append(",\"password\":\"").append(escapeJson(password)).append("\"");
+        sb.append(",\"objectName\":\"").append(escapeJson(objectName)).append("\"");
+        sb.append(",\"objectType\":\"").append(escapeJson(objectType)).append("\"");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private static String buildRenderPackageDiagramInputJson(String systemUrl, String client, String username,
+                                                              String password, String packageName,
+                                                              int maxSubPackageDepth) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"command\":\"render-diagram\"");
+        sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
+        sb.append(",\"client\":\"").append(escapeJson(client)).append("\"");
+        sb.append(",\"username\":\"").append(escapeJson(username)).append("\"");
+        sb.append(",\"password\":\"").append(escapeJson(password)).append("\"");
+        sb.append(",\"packageName\":\"").append(escapeJson(packageName)).append("\"");
+        if (maxSubPackageDepth > 0) {
+            sb.append(",\"maxSubPackageDepth\":").append(maxSubPackageDepth);
+        }
+        sb.append("}");
         return sb.toString();
     }
 

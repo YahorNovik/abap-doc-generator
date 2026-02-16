@@ -62,9 +62,24 @@ public class GenerateDocHandler extends AbstractHandler {
         // Token budget
         int maxTotalTokens = store.getInt(ConnectionPreferencePage.PREF_MAX_TOKENS);
 
-        // Documentation template
-        String templateType = store.getString(ConnectionPreferencePage.PREF_TEMPLATE);
-        String templateCustom = store.getString(ConnectionPreferencePage.PREF_TEMPLATE_CUSTOM);
+        // Documentation template — resolve from stored templates
+        String templateType;
+        String templateCustom;
+        int templateMaxWords = 0;
+        int templateMaxOutputTokens = 0;
+        TemplateManagerDialog.TemplateItem selectedTemplate = ConnectionPreferencePage.resolveSelectedTemplate(store);
+        if (selectedTemplate != null) {
+            // User has a stored template (custom or customized built-in)
+            templateType = "custom";
+            templateCustom = selectedTemplate.sections;
+            templateMaxWords = selectedTemplate.maxWords;
+            templateMaxOutputTokens = selectedTemplate.maxOutputTokens;
+        } else {
+            // Built-in template with no customization — map to TS-side names
+            String selectedName = store.getString(ConnectionPreferencePage.PREF_TEMPLATE);
+            templateType = mapBuiltInName(selectedName);
+            templateCustom = "";
+        }
 
         if (summaryApiKey.isBlank() || summaryModel.isBlank() || docApiKey.isBlank() || docModel.isBlank()) {
             MessageDialog.openError(shell, "ABAP Doc Generator",
@@ -110,6 +125,8 @@ public class GenerateDocHandler extends AbstractHandler {
         final int fMaxTotalTokens = maxTotalTokens;
         final String fTemplateType = templateType;
         final String fTemplateCustom = templateCustom;
+        final int fTemplateMaxWords = templateMaxWords;
+        final int fTemplateMaxOutputTokens = templateMaxOutputTokens;
         final String fUserContext = userContext;
 
         Job job = new Job("Generating documentation for " + objectName) {
@@ -128,6 +145,7 @@ public class GenerateDocHandler extends AbstractHandler {
                         docProvider, docApiKey, docModel, docBaseUrl,
                         fMaxTotalTokens,
                         fTemplateType, fTemplateCustom,
+                        fTemplateMaxWords, fTemplateMaxOutputTokens,
                         fUserContext,
                         line -> {
                             monitor.subTask(line);
@@ -312,6 +330,18 @@ public class GenerateDocHandler extends AbstractHandler {
             sb.append("  Tool calls: ").append(toolCalls);
         }
         return sb.toString();
+    }
+
+    /**
+     * Maps the preference template name to the TypeScript-side template key.
+     */
+    private static String mapBuiltInName(String name) {
+        if (name == null) return "default";
+        switch (name) {
+            case "Minimal": return "minimal";
+            case "Detailed": return "detailed";
+            default: return "default";
+        }
     }
 
     private static int extractIntField(String json, String field) {

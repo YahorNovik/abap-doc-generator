@@ -284,7 +284,7 @@ async function processPackageObjects(
           .filter((e) => e.to === obj.name)
           .map((e) => ({ name: e.from, type: objectMap.get(e.from)?.type ?? "UNKNOWN", description: "Package-internal reference" }));
 
-        const template = resolveTemplate(input.templateType, input.templateCustom, obj.type);
+        const template = resolveTemplate(input.templateType, input.templateCustom, obj.type, input.templateMaxWords, input.templateMaxOutputTokens);
         const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
         const docMessages = buildDocPrompt(dagNode, effectiveSource, depDetails, template, internalWhereUsed, input.userContext);
 

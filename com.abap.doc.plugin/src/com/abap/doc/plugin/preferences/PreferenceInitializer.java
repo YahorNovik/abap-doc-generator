@@ -23,7 +23,8 @@ public class PreferenceInitializer extends AbstractPreferenceInitializer {
         store.setDefault(ConnectionPreferencePage.PREF_MAX_TOKENS, 500000);
 
         // Documentation template default
-        store.setDefault(ConnectionPreferencePage.PREF_TEMPLATE, "default");
+        store.setDefault(ConnectionPreferencePage.PREF_TEMPLATE, "Default");
+        store.setDefault(ConnectionPreferencePage.PREF_CUSTOM_TEMPLATES, "[]");
 
         // Sub-package depth (2 levels by default)
         store.setDefault(ConnectionPreferencePage.PREF_MAX_SUBPACKAGE_DEPTH, 2);

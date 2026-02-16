@@ -72,7 +72,7 @@ For `openai-compatible` providers, also set the **Base URL** field to your endpo
 |---------|----------|-------------|
 | Generate ABAP Documentation | `Ctrl+Shift+D` | Generate docs for the object in the active editor |
 | Generate Package Documentation | `Ctrl+Shift+P` | Generate docs for a selected package |
-| Build Dependency Graph | `Ctrl+Shift+G` | Build and display the dependency DAG |
+| Show Dependency Diagram | `Ctrl+Shift+G` | Show a visual Mermaid dependency diagram |
 | Save Documentation | `Ctrl+Shift+S` | Export current documentation to file |
 | Open ABAP Doc Chat | `Ctrl+Shift+C` | Open the interactive chat view |
 
