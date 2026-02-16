@@ -5,7 +5,7 @@ import { callLlm, callLlmAgentLoop } from "./llm-client";
 import { computeTopologicalLevels } from "./doc-generator";
 import {
   buildSummaryPrompt, buildDocPrompt, buildTriagePrompt,
-  buildClusterSummaryPrompt,
+  buildClusterSummaryPrompt, buildClusterSplitPrompt, buildStandaloneAssignPrompt,
 } from "./prompts";
 import { AGENT_TOOLS } from "./tools";
 import { resolveTemplate, CLUSTER_SUMMARY_MAX_TOKENS } from "./templates";
@@ -128,7 +128,11 @@ async function processPackageObjects(
     log(`[${packageLabel}] Restored ${clusters.length} cluster(s) from precomputed assignments.`);
   } else {
     log(`[${packageLabel}] Detecting functional clusters...`);
-    clusters = detectClusters(graph);
+    const detectResult = detectClusters(graph);
+    clusters = detectResult.clusters;
+    if (detectResult.hubs.length > 0) {
+      log(`[${packageLabel}] Hub objects filtered: ${detectResult.hubs.join(", ")}`);
+    }
     log(`[${packageLabel}] Found ${clusters.length} cluster(s).`);
   }
 
@@ -201,6 +205,63 @@ async function processPackageObjects(
       }
     } else {
       log(`  Using precomputed summaries for ${cluster.objects.length} objects.`);
+    }
+
+    // LLM-driven cluster split check (only for unnamed clusters with >3 objects, not Standalone)
+    if (!hasClusterAssignments && cluster.name !== "Standalone Objects" && cluster.objects.length > 8) {
+      const splitObjects = cluster.objects.map((o) => ({
+        name: o.name, type: o.type, summary: summaries[o.name] ?? o.description ?? "",
+      }));
+      try {
+        log(`  Checking if cluster (${cluster.objects.length} objects) should be split...`);
+        const splitResponse = await callLlm(input.summaryLlm, buildClusterSplitPrompt(splitObjects, cluster.internalEdges));
+        summaryTokens += splitResponse.usage.promptTokens + splitResponse.usage.completionTokens;
+        const trimmed = splitResponse.content.trim();
+
+        if (trimmed !== "KEEP" && trimmed.startsWith("[")) {
+          try {
+            const groups: Array<{ objects: string[] }> = JSON.parse(trimmed);
+            if (Array.isArray(groups) && groups.length > 1 && groups.every((g) => g.objects?.length >= 2)) {
+              log(`  LLM recommends splitting into ${groups.length} sub-groups.`);
+              const allObjectMap = new Map(cluster.objects.map((o) => [o.name, o]));
+              const newClusters: Cluster[] = [];
+              let nextId = Math.max(...clusters.map((c) => c.id)) + 1;
+
+              for (const group of groups) {
+                const groupObjects = group.objects
+                  .map((n) => allObjectMap.get(n.toUpperCase()) ?? allObjectMap.get(n))
+                  .filter((o): o is PackageObject => !!o);
+                if (groupObjects.length === 0) continue;
+                const groupNames = new Set(groupObjects.map((o) => o.name));
+                const groupEdges = cluster.internalEdges.filter(
+                  (e) => groupNames.has(e.from) && groupNames.has(e.to),
+                );
+                newClusters.push({
+                  id: nextId++,
+                  name: "",
+                  objects: groupObjects,
+                  internalEdges: groupEdges,
+                  topologicalOrder: groupObjects.map((o) => o.name),
+                });
+              }
+
+              if (newClusters.length > 1) {
+                // Replace current cluster with the split sub-clusters
+                clusters.splice(ci, 1, ...newClusters);
+                // Re-process from same index (first new sub-cluster)
+                ci--;
+                continue;
+              }
+            }
+          } catch {
+            log(`  WARNING: Failed to parse cluster split response, keeping original cluster.`);
+          }
+        } else {
+          log(`  Cluster is cohesive, keeping as-is.`);
+        }
+      } catch (err) {
+        log(`  WARNING: Cluster split check failed: ${String(err)}, keeping original cluster.`);
+      }
     }
 
     // Triage
@@ -450,6 +511,46 @@ function rebuildClustersFromAssignments(
  * Runs Phase 2: source fetch, graph, summarization, clustering, triage.
  * Returns triage decisions + summaries for the user to review before Phase 3.
  */
+/**
+ * Suggests cluster assignments for standalone objects using LLM.
+ * Called from Java UI when user clicks "Auto-suggest" in the StandaloneReassignDialog.
+ */
+export async function suggestStandaloneAssignments(input: {
+  summaryLlm: LlmConfig;
+  standaloneObjects: Array<{ name: string; type: string; summary: string }>;
+  clusters: Array<{ name: string; summary: string }>;
+}): Promise<{ assignments: Record<string, string> }> {
+  const assignments: Record<string, string> = {};
+
+  if (input.standaloneObjects.length === 0 || input.clusters.length === 0) {
+    return { assignments };
+  }
+
+  try {
+    const messages = buildStandaloneAssignPrompt(input.standaloneObjects, input.clusters);
+    const response = await callLlm(input.summaryLlm, messages);
+
+    for (const line of response.content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.includes("->")) continue;
+      const [objPart, clusterPart] = trimmed.split("->").map((s) => s.trim());
+      if (objPart && clusterPart && clusterPart !== "KEEP") {
+        // Validate the cluster name exists
+        const matchedCluster = input.clusters.find(
+          (c) => c.name === clusterPart || c.name.toUpperCase() === clusterPart.toUpperCase(),
+        );
+        if (matchedCluster) {
+          assignments[objPart] = matchedCluster.name;
+        }
+      }
+    }
+  } catch (err) {
+    log(`WARNING: Standalone assignment suggestion failed: ${String(err)}`);
+  }
+
+  return { assignments };
+}
+
 export async function triagePackage(input: TriageInput): Promise<TriageResult> {
   const errors: string[] = [];
   const excludedSet = input.excludedObjects && input.excludedObjects.length > 0

@@ -244,6 +244,105 @@ export function buildClusterSummaryPrompt(
 }
 
 /**
+ * Builds prompt for asking LLM whether a cluster should be split.
+ * Only used for clusters with >3 objects. LLM decides if the group is cohesive
+ * or should be divided into sub-groups.
+ */
+export function buildClusterSplitPrompt(
+  objects: Array<{ name: string; type: string; summary: string }>,
+  edges: DagEdge[],
+): LlmMessage[] {
+  const system = [
+    "You are an ABAP documentation expert analyzing a group of related ABAP objects.",
+    "Determine if this group forms ONE cohesive functional area, or if it should be split into separate groups.",
+    "",
+    "If the group is cohesive (all objects serve the same purpose/domain), respond with exactly:",
+    "KEEP",
+    "",
+    "If the group should be split, respond with a JSON array of groups. Each group is an object with:",
+    '- "objects": array of object names belonging to this sub-group',
+    "",
+    "Example split response:",
+    '[{"objects":["ZCL_A","ZCL_B"]},{"objects":["ZCL_C","ZCL_D","ZCL_E"]}]',
+    "",
+    "Rules:",
+    "- Only split if objects clearly serve DIFFERENT functional purposes",
+    "- Each sub-group must have at least 2 objects",
+    "- If in doubt, respond KEEP — do not force splits",
+    "- Output ONLY 'KEEP' or the JSON array, nothing else",
+  ].join("\n");
+
+  const parts: string[] = [
+    `Group contains ${objects.length} objects:`,
+    "",
+  ];
+
+  for (const obj of objects) {
+    parts.push(`- ${obj.name} (${obj.type}): ${obj.summary}`);
+  }
+
+  if (edges.length > 0) {
+    parts.push("");
+    parts.push("Internal dependencies:");
+    for (const edge of edges) {
+      const refs = edge.references.map((r) => r.memberName).join(", ");
+      parts.push(`- ${edge.from} -> ${edge.to}${refs ? ` (uses: ${refs})` : ""}`);
+    }
+  }
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: parts.join("\n") },
+  ];
+}
+
+/**
+ * Builds prompt for suggesting which cluster standalone objects should be assigned to.
+ * Returns one line per standalone object: "OBJECT_NAME -> CLUSTER_NAME" or "OBJECT_NAME -> KEEP".
+ */
+export function buildStandaloneAssignPrompt(
+  standaloneObjects: Array<{ name: string; type: string; summary: string }>,
+  clusters: Array<{ name: string; summary: string }>,
+): LlmMessage[] {
+  const system = [
+    "You are an ABAP documentation expert.",
+    "For each standalone object below, decide whether it semantically belongs to one of the named groups, or should stay standalone.",
+    "",
+    "Output one line per object in this exact format:",
+    "OBJECT_NAME -> GROUP_NAME",
+    "or",
+    "OBJECT_NAME -> KEEP",
+    "",
+    "Rules:",
+    "- Only assign an object to a group if it clearly fits the group's functional purpose",
+    "- If unsure, output KEEP",
+    "- Output ONLY the assignment lines, nothing else",
+  ].join("\n");
+
+  const parts: string[] = [
+    "Available groups:",
+    "",
+  ];
+
+  for (const cluster of clusters) {
+    parts.push(`- ${cluster.name}: ${cluster.summary}`);
+  }
+
+  parts.push("");
+  parts.push("Standalone objects to evaluate:");
+  parts.push("");
+
+  for (const obj of standaloneObjects) {
+    parts.push(`- ${obj.name} (${obj.type}): ${obj.summary}`);
+  }
+
+  return [
+    { role: "system", content: system },
+    { role: "user", content: parts.join("\n") },
+  ];
+}
+
+/**
  * Builds prompt for generating the package-level overview from cluster summaries.
  * Used with the capable model.
  */

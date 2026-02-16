@@ -98,20 +98,123 @@ export function buildPackageGraph(
 }
 
 /**
+ * Identifies "hub" objects that are referenced by a large fraction of the package.
+ * Hub edges are excluded from Union-Find to prevent unrelated groups from merging.
+ * A hub is an object with inbound edges from >50% of other objects (min 3 inbound).
+ */
+function identifyHubs(graph: PackageGraph): Set<string> {
+  const totalObjects = graph.objects.length;
+  if (totalObjects < 4) return new Set(); // too small for hubs
+
+  const inboundCount = new Map<string, number>();
+  for (const edge of graph.internalEdges) {
+    inboundCount.set(edge.to, (inboundCount.get(edge.to) ?? 0) + 1);
+  }
+
+  const threshold = Math.max(3, Math.floor(totalObjects * 0.5));
+  const hubs = new Set<string>();
+  for (const [name, count] of inboundCount) {
+    if (count >= threshold) {
+      hubs.add(name);
+    }
+  }
+  return hubs;
+}
+
+/**
+ * Assigns hub objects to the cluster that references them most.
+ * If no cluster references a hub, it stays as a singleton.
+ */
+function assignHubsToClusters(
+  hubs: Set<string>,
+  clusters: Cluster[],
+  graph: PackageGraph,
+  objectMap: Map<string, PackageObject>,
+): void {
+  for (const hubName of hubs) {
+    const hubObj = objectMap.get(hubName);
+    if (!hubObj) continue;
+
+    // Count how many objects from each cluster reference this hub
+    const clusterRefCounts = new Map<number, number>();
+    for (const edge of graph.internalEdges) {
+      if (edge.to !== hubName) continue;
+      for (const cluster of clusters) {
+        if (cluster.name === "Standalone Objects") continue;
+        if (cluster.objects.some((o) => o.name === edge.from)) {
+          clusterRefCounts.set(cluster.id, (clusterRefCounts.get(cluster.id) ?? 0) + 1);
+        }
+      }
+    }
+
+    if (clusterRefCounts.size === 0) continue;
+
+    // Find cluster with most references
+    let bestClusterId = -1;
+    let bestCount = 0;
+    for (const [cid, count] of clusterRefCounts) {
+      if (count > bestCount) {
+        bestCount = count;
+        bestClusterId = cid;
+      }
+    }
+
+    if (bestClusterId >= 0) {
+      const target = clusters.find((c) => c.id === bestClusterId);
+      if (target) {
+        target.objects.push(hubObj);
+        // Add edges involving this hub within the cluster
+        const memberSet = new Set(target.objects.map((o) => o.name));
+        const hubEdges = graph.internalEdges.filter(
+          (e) => (e.from === hubName || e.to === hubName) && memberSet.has(e.from) && memberSet.has(e.to),
+        );
+        for (const he of hubEdges) {
+          if (!target.internalEdges.some((e) => e.from === he.from && e.to === he.to)) {
+            target.internalEdges.push(he);
+          }
+        }
+        // Re-sort topological order
+        target.topologicalOrder = topologicalSortCluster(target.objects, target.internalEdges);
+
+        // Remove from standalone if it was there
+        const standaloneCluster = clusters.find((c) => c.name === "Standalone Objects");
+        if (standaloneCluster) {
+          standaloneCluster.objects = standaloneCluster.objects.filter((o) => o.name !== hubName);
+          standaloneCluster.topologicalOrder = standaloneCluster.topologicalOrder.filter((n) => n !== hubName);
+        }
+      }
+    }
+  }
+}
+
+/**
  * Detects connected components using Union-Find.
  * Returns clusters with internal edges and topological order.
  * Singletons (no internal connections) are grouped into a "Standalone Objects" cluster.
+ *
+ * Hub filtering: objects referenced by >50% of the package are excluded from Union-Find
+ * to prevent unrelated groups from merging through shared utilities. Hubs are then
+ * assigned to the cluster that references them most.
  */
-export function detectClusters(graph: PackageGraph): Cluster[] {
+export function detectClusters(graph: PackageGraph): { clusters: Cluster[]; hubs: string[] } {
   const names = graph.objects.map((o) => o.name);
-  const uf = new UnionFind(names);
+  const objectMap = new Map(graph.objects.map((o) => [o.name, o]));
+
+  // Identify and exclude hub objects from Union-Find
+  const hubs = identifyHubs(graph);
+  if (hubs.size > 0) {
+    pkgLog(`  Hub objects detected (excluded from clustering): ${[...hubs].join(", ")}`);
+  }
+
+  const uf = new UnionFind(names.filter((n) => !hubs.has(n)));
 
   for (const edge of graph.internalEdges) {
+    // Skip edges involving hubs
+    if (hubs.has(edge.from) || hubs.has(edge.to)) continue;
     uf.union(edge.from, edge.to);
   }
 
   const components = uf.getComponents();
-  const objectMap = new Map(graph.objects.map((o) => [o.name, o]));
   const clusters: Cluster[] = [];
   const singletons: PackageObject[] = [];
   let clusterId = 0;
@@ -119,10 +222,12 @@ export function detectClusters(graph: PackageGraph): Cluster[] {
   for (const [, members] of components) {
     const clusterObjects = members.map((m) => objectMap.get(m)!).filter(Boolean);
 
-    // Check if this is a singleton with no internal edges
+    // Check if this is a singleton with no internal edges (excluding hub edges)
     if (clusterObjects.length === 1) {
       const name = clusterObjects[0].name;
-      const hasEdges = graph.internalEdges.some((e) => e.from === name || e.to === name);
+      const hasEdges = graph.internalEdges.some(
+        (e) => (e.from === name || e.to === name) && !hubs.has(e.from) && !hubs.has(e.to),
+      );
       if (!hasEdges) {
         singletons.push(clusterObjects[0]);
         continue;
@@ -145,6 +250,12 @@ export function detectClusters(graph: PackageGraph): Cluster[] {
     });
   }
 
+  // Add hub objects as singletons initially (will be reassigned below)
+  for (const hubName of hubs) {
+    const hubObj = objectMap.get(hubName);
+    if (hubObj) singletons.push(hubObj);
+  }
+
   if (singletons.length > 0) {
     clusters.push({
       id: clusterId,
@@ -155,7 +266,15 @@ export function detectClusters(graph: PackageGraph): Cluster[] {
     });
   }
 
-  return clusters;
+  // Assign hubs to the cluster that references them most
+  if (hubs.size > 0) {
+    assignHubsToClusters(hubs, clusters, graph, objectMap);
+  }
+
+  // Remove empty standalone cluster if all hubs were reassigned
+  const finalClusters = clusters.filter((c) => c.objects.length > 0);
+
+  return { clusters: finalClusters, hubs: [...hubs] };
 }
 
 function pkgLog(msg: string): void {
