@@ -374,7 +374,7 @@ export async function listPackageObjects(
   client: AdtClientWrapper,
   packageName: string,
   maxDepth: number,
-): Promise<{ objects: Array<{ name: string; type: string; description: string; subPackage: string }>;
+): Promise<{ objects: Array<{ name: string; type: string; description: string; uri: string; subPackage: string }>;
              subPackages: string[];
              errors: string[] }> {
   const errors: string[] = [];
@@ -383,7 +383,7 @@ export async function listPackageObjects(
   const tree = await discoverPackageTree(client, packageName, maxDepth, errors);
   const allNodes = flattenPackageTree(tree);
 
-  const objects: Array<{ name: string; type: string; description: string; subPackage: string }> = [];
+  const objects: Array<{ name: string; type: string; description: string; uri: string; subPackage: string }> = [];
   const subPackages: string[] = [];
 
   for (const node of allNodes) {
@@ -396,6 +396,7 @@ export async function listPackageObjects(
         name: obj.name,
         type: obj.type,
         description: obj.description,
+        uri: obj.uri,
         subPackage: subPkgLabel,
       });
     }

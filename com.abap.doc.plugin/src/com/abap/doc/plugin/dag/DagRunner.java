@@ -82,10 +82,11 @@ public class DagRunner {
                                 String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                                 int maxSubPackageDepth,
                                 String[] excludedObjects,
+                                java.util.List<com.abap.doc.plugin.handler.ObjectSelectionDialog.PackageObjectItem> preDiscoveredObjects,
                                 Consumer<String> progressCallback) throws IOException, InterruptedException {
         String input = buildTriageInputJson(systemUrl, client, username, password, packageName,
             summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
-            maxSubPackageDepth, excludedObjects);
+            maxSubPackageDepth, excludedObjects, preDiscoveredObjects);
         return runScript(input, progressCallback);
     }
 
@@ -103,6 +104,7 @@ public class DagRunner {
                                      Map<String, String> precomputedSummaries,
                                      Map<String, String> precomputedClusterSummaries,
                                      Map<String, String[]> precomputedClusterAssignments,
+                                     java.util.List<com.abap.doc.plugin.handler.ObjectSelectionDialog.PackageObjectItem> preDiscoveredObjects,
                                      Consumer<String> progressCallback) throws IOException, InterruptedException {
 
         String input = buildPackageDocInputJson(systemUrl, client, username, password, packageName,
@@ -110,7 +112,8 @@ public class DagRunner {
             docProvider, docApiKey, docModel, docBaseUrl, maxTotalTokens,
             templateType, templateCustom, templateMaxWords, templateMaxOutputTokens,
             userContext, maxSubPackageDepth, excludedObjects,
-            fullDocObjects, precomputedSummaries, precomputedClusterSummaries, precomputedClusterAssignments);
+            fullDocObjects, precomputedSummaries, precomputedClusterSummaries, precomputedClusterAssignments,
+            preDiscoveredObjects);
         return runScript(input, progressCallback);
     }
 
@@ -253,7 +256,8 @@ public class DagRunner {
                                                 String packageName,
                                                 String summaryProvider, String summaryApiKey, String summaryModel, String summaryBaseUrl,
                                                 int maxSubPackageDepth,
-                                                String[] excludedObjects) {
+                                                String[] excludedObjects,
+                                                java.util.List<com.abap.doc.plugin.handler.ObjectSelectionDialog.PackageObjectItem> preDiscoveredObjects) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"triage-package\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -280,6 +284,7 @@ public class DagRunner {
             }
             sb.append("]");
         }
+        appendPreDiscoveredObjects(sb, preDiscoveredObjects);
         sb.append("}");
         return sb.toString();
     }
@@ -297,7 +302,8 @@ public class DagRunner {
                                                     String[] fullDocObjects,
                                                     Map<String, String> precomputedSummaries,
                                                     Map<String, String> precomputedClusterSummaries,
-                                                    Map<String, String[]> precomputedClusterAssignments) {
+                                                    Map<String, String[]> precomputedClusterAssignments,
+                                                    java.util.List<com.abap.doc.plugin.handler.ObjectSelectionDialog.PackageObjectItem> preDiscoveredObjects) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"command\":\"generate-package-doc\"");
         sb.append(",\"systemUrl\":\"").append(escapeJson(systemUrl)).append("\"");
@@ -394,6 +400,7 @@ public class DagRunner {
             }
             sb.append("}");
         }
+        appendPreDiscoveredObjects(sb, preDiscoveredObjects);
         sb.append("}");
         return sb.toString();
     }
@@ -495,6 +502,22 @@ public class DagRunner {
         }
         sb.append("}");
         return sb.toString();
+    }
+
+    private static void appendPreDiscoveredObjects(StringBuilder sb,
+            java.util.List<com.abap.doc.plugin.handler.ObjectSelectionDialog.PackageObjectItem> objects) {
+        if (objects == null || objects.isEmpty()) return;
+        sb.append(",\"preDiscoveredObjects\":[");
+        for (int i = 0; i < objects.size(); i++) {
+            if (i > 0) sb.append(",");
+            var obj = objects.get(i);
+            sb.append("{\"name\":\"").append(escapeJson(obj.name)).append("\"");
+            sb.append(",\"type\":\"").append(escapeJson(obj.type)).append("\"");
+            sb.append(",\"description\":\"").append(escapeJson(obj.description)).append("\"");
+            sb.append(",\"uri\":\"").append(escapeJson(obj.uri)).append("\"");
+            sb.append(",\"subPackage\":\"").append(escapeJson(obj.subPackage)).append("\"}");
+        }
+        sb.append("]");
     }
 
     public static String escapeJson(String value) {

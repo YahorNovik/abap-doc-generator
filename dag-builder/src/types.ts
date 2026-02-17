@@ -119,10 +119,20 @@ export interface ListObjectsResult {
     name: string;
     type: string;
     description: string;
+    uri: string;
     subPackage: string;
   }>;
   subPackages: string[];
   errors: string[];
+}
+
+/** Pre-discovered object from Phase 1, passed to Phase 2/3 to skip tree discovery. */
+export interface PreDiscoveredObject {
+  name: string;
+  type: string;
+  description: string;
+  uri: string;
+  subPackage: string;
 }
 
 export interface PackageDocInput {
@@ -143,6 +153,7 @@ export interface PackageDocInput {
   userContext?: string;        // additional context/notes from the user
   maxSubPackageDepth?: number; // recursion depth for sub-packages (default 2)
   excludedObjects?: string[];  // object names to skip docs for (still in diagrams)
+  preDiscoveredObjects?: PreDiscoveredObject[]; // skip tree discovery when provided from Phase 1
 
   // Phase 3 inputs — skip triage/summarization when provided from Phase 2
   fullDocObjects?: string[];                      // user-approved objects for full docs (skips triage)
@@ -163,6 +174,7 @@ export interface TriageInput {
   summaryLlm: LlmConfig;
   maxSubPackageDepth?: number;
   excludedObjects?: string[];
+  preDiscoveredObjects?: PreDiscoveredObject[];
 }
 
 export interface TriageResult {

@@ -156,8 +156,9 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                     }
 
                     // Show selection dialog on UI thread AFTER the job completes
+                    final List<ObjectSelectionDialog.PackageObjectItem> discoveredObjects = objects;
                     display.asyncExec(() -> showObjectSelectionAndContinue(
-                        shell, display, objects, packageName,
+                        shell, display, discoveredObjects, packageName,
                         systemUrl, client, username, password,
                         summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
                         docProvider, docApiKey, docModel, docBaseUrl,
@@ -218,6 +219,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         summaryProvider, summaryApiKey, summaryModel, summaryBaseUrl,
                         maxSubPackageDepth,
                         excludedObjects,
+                        objects,
                         line -> {
                             triageMonitor.subTask(line);
                             PluginConsole.println(line);
@@ -248,7 +250,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         templateMaxWords, templateMaxOutputTokens, userContext,
                         maxSubPackageDepth, excludedObjects,
                         precomputedSummaries, precomputedClusterSummaries, precomputedClusterAssignments,
-                        triageTokens));
+                        triageTokens, objects));
 
                     return Status.OK_STATUS;
                 } catch (Exception e) {
@@ -280,7 +282,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             Map<String, String> precomputedSummaries,
             Map<String, String> precomputedClusterSummaries,
             Map<String, String[]> precomputedClusterAssignments,
-            int triageTokens) {
+            int triageTokens,
+            List<ObjectSelectionDialog.PackageObjectItem> discoveredObjects) {
 
         TriageReviewDialog triageDialog = new TriageReviewDialog(shell, triageItems);
         if (triageDialog.open() != Window.OK) {
@@ -314,6 +317,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         precomputedSummaries,
                         precomputedClusterSummaries,
                         precomputedClusterAssignments,
+                        discoveredObjects,
                         line -> {
                             genMonitor.subTask(line);
                             PluginConsole.println(line);
@@ -485,16 +489,19 @@ public class GeneratePackageDocHandler extends AbstractHandler {
 
     private static String extractPackageTokenUsage(String json, int triageTokens) {
         int objectDocTokens = extractIntField(json, "objectDocTokens");
-        int totalTokens = extractIntField(json, "totalTokens") + triageTokens;
+        int phase3SummaryTokens = extractIntField(json, "summaryTokens");
+        int phase3ClusterTokens = extractIntField(json, "clusterSummaryTokens");
+        int overviewTokens = extractIntField(json, "overviewTokens");
         int objectCount = extractIntField(json, "objectCount");
         int clusterCount = extractIntField(json, "clusterCount");
+
+        int allSummarizationTokens = triageTokens + phase3SummaryTokens + phase3ClusterTokens;
+        int totalTokens = allSummarizationTokens + objectDocTokens + overviewTokens;
 
         StringBuilder sb = new StringBuilder();
         sb.append("Package: ").append(objectCount).append(" objects, ").append(clusterCount).append(" clusters\n\n");
         sb.append("Token Usage:\n");
-        if (triageTokens > 0) {
-            sb.append("  Summarization & triage tokens: ").append(String.format("%,d", triageTokens)).append("\n");
-        }
+        sb.append("  Summarization & triage tokens: ").append(String.format("%,d", allSummarizationTokens)).append("\n");
         sb.append("  Documentation tokens: ").append(String.format("%,d", objectDocTokens)).append("\n");
         sb.append("  Total tokens: ").append(String.format("%,d", totalTokens));
         return sb.toString();
@@ -543,9 +550,10 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             String type = extractSimpleField(objJson, "type");
             String description = extractSimpleField(objJson, "description");
             String subPackage = extractSimpleField(objJson, "subPackage");
+            String uri = extractSimpleField(objJson, "uri");
 
             if (name != null && !name.isEmpty()) {
-                items.add(new ObjectSelectionDialog.PackageObjectItem(name, type, description, subPackage));
+                items.add(new ObjectSelectionDialog.PackageObjectItem(name, type, description, subPackage, uri));
             }
 
             pos = objEnd + 1;

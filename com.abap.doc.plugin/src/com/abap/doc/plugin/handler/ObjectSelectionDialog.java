@@ -34,12 +34,14 @@ public class ObjectSelectionDialog extends TitleAreaDialog {
         public final String type;
         public final String description;
         public final String subPackage;
+        public final String uri;
 
-        public PackageObjectItem(String name, String type, String description, String subPackage) {
+        public PackageObjectItem(String name, String type, String description, String subPackage, String uri) {
             this.name = name;
             this.type = type;
             this.description = description != null ? description : "";
             this.subPackage = subPackage != null ? subPackage : "";
+            this.uri = uri != null ? uri : "";
         }
     }
 

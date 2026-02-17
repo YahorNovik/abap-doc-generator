@@ -16,7 +16,7 @@ import {
 } from "./html-renderer";
 import {
   PackageDocInput, PackageDocResult, PackageObject, PackageGraph, Cluster, SubPackageNode,
-  DagEdge, DagNode, LlmConfig, ToolCall, TriageInput, TriageResult,
+  DagEdge, DagNode, LlmConfig, ToolCall, TriageInput, TriageResult, PreDiscoveredObject,
 } from "./types";
 
 const MAX_PACKAGE_OBJECTS = 100;
@@ -451,6 +451,54 @@ function rebuildClustersFromAssignments(
 }
 
 /**
+ * Reconstructs a SubPackageNode tree from a flat list of pre-discovered objects.
+ * Objects with empty subPackage belong to the root; others are grouped by subPackage name.
+ */
+function buildTreeFromPreDiscovered(
+  packageName: string,
+  preDiscovered: PreDiscoveredObject[],
+): SubPackageNode {
+  const rootObjects: PackageObject[] = [];
+  const subPackageMap = new Map<string, PackageObject[]>();
+
+  for (const obj of preDiscovered) {
+    const po: PackageObject = {
+      name: obj.name,
+      type: obj.type,
+      description: obj.description,
+      uri: obj.uri,
+    };
+    if (!obj.subPackage || obj.subPackage === "") {
+      rootObjects.push(po);
+    } else {
+      if (!subPackageMap.has(obj.subPackage)) {
+        subPackageMap.set(obj.subPackage, []);
+      }
+      subPackageMap.get(obj.subPackage)!.push(po);
+    }
+  }
+
+  const children: SubPackageNode[] = [];
+  for (const [spName, spObjects] of subPackageMap) {
+    children.push({
+      name: spName,
+      description: "",
+      depth: 1,
+      objects: spObjects,
+      children: [],
+    });
+  }
+
+  return {
+    name: packageName,
+    description: "",
+    depth: 0,
+    objects: rootObjects,
+    children,
+  };
+}
+
+/**
  * Runs Phase 2: source fetch, graph, summarization, clustering, triage.
  * Returns triage decisions + summaries for the user to review before Phase 3.
  */
@@ -465,9 +513,15 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
   );
 
   try {
-    const maxDepth = input.maxSubPackageDepth ?? 2;
-    log(`[triage] Discovering package tree for ${input.packageName} (max depth: ${maxDepth})...`);
-    const tree = await discoverPackageTree(client, input.packageName, maxDepth, errors);
+    let tree: SubPackageNode;
+    if (input.preDiscoveredObjects && input.preDiscoveredObjects.length > 0) {
+      log(`[triage] Using ${input.preDiscoveredObjects.length} pre-discovered objects (skipping tree discovery).`);
+      tree = buildTreeFromPreDiscovered(input.packageName, input.preDiscoveredObjects);
+    } else {
+      const maxDepth = input.maxSubPackageDepth ?? 2;
+      log(`[triage] Discovering package tree for ${input.packageName} (max depth: ${maxDepth})...`);
+      tree = await discoverPackageTree(client, input.packageName, maxDepth, errors);
+    }
 
     const allNodes = flattenPackageTree(tree);
     const subPackagesWithObjects = allNodes.filter((n) => n.depth > 0 && n.objects.length > 0);
@@ -589,10 +643,16 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
   );
 
   try {
-    // 1. Discover package tree (always, to detect sub-packages)
-    const maxDepth = input.maxSubPackageDepth ?? 2;
-    log(`Discovering package tree for ${input.packageName} (max depth: ${maxDepth})...`);
-    const tree = await discoverPackageTree(client, input.packageName, maxDepth, errors);
+    // 1. Discover package tree (or use pre-discovered objects from Phase 1)
+    let tree: SubPackageNode;
+    if (input.preDiscoveredObjects && input.preDiscoveredObjects.length > 0) {
+      log(`Using ${input.preDiscoveredObjects.length} pre-discovered objects (skipping tree discovery).`);
+      tree = buildTreeFromPreDiscovered(input.packageName, input.preDiscoveredObjects);
+    } else {
+      const maxDepth = input.maxSubPackageDepth ?? 2;
+      log(`Discovering package tree for ${input.packageName} (max depth: ${maxDepth})...`);
+      tree = await discoverPackageTree(client, input.packageName, maxDepth, errors);
+    }
 
     const allNodes = flattenPackageTree(tree);
     const subPackagesWithObjects = allNodes.filter((n) => n.depth > 0 && n.objects.length > 0);
