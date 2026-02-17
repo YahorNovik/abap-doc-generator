@@ -492,10 +492,16 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         StringBuilder sb = new StringBuilder();
         sb.append("Package: ").append(objectCount).append(" objects, ").append(clusterCount).append(" clusters\n\n");
         sb.append("Token Usage:\n");
-        sb.append("  Summary tokens: ").append(String.format("%,d", summaryTokens)).append("\n");
+        if (summaryTokens > 0) {
+            sb.append("  Summary tokens: ").append(String.format("%,d", summaryTokens)).append("\n");
+        }
         sb.append("  Object doc tokens: ").append(String.format("%,d", objectDocTokens)).append("\n");
-        sb.append("  Cluster summary tokens: ").append(String.format("%,d", clusterSummaryTokens)).append("\n");
-        sb.append("  Overview tokens: ").append(String.format("%,d", overviewTokens)).append("\n");
+        if (clusterSummaryTokens > 0) {
+            sb.append("  Cluster summary tokens: ").append(String.format("%,d", clusterSummaryTokens)).append("\n");
+        }
+        if (overviewTokens > 0) {
+            sb.append("  Overview tokens: ").append(String.format("%,d", overviewTokens)).append("\n");
+        }
         sb.append("  Total tokens: ").append(String.format("%,d", totalTokens));
         return sb.toString();
     }

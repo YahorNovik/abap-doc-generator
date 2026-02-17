@@ -138,18 +138,8 @@ public class TriageReviewDialog extends TitleAreaDialog {
 
         // Button bar
         Composite buttonBar = new Composite(container, SWT.NONE);
-        buttonBar.setLayout(new GridLayout(3, false));
+        buttonBar.setLayout(new GridLayout(2, false));
         buttonBar.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-
-        Button acceptLlmBtn = new Button(buttonBar, SWT.PUSH);
-        acceptLlmBtn.setText("Accept LLM Choices");
-        acceptLlmBtn.addSelectionListener(new SelectionAdapter() {
-            @Override
-            public void widgetSelected(SelectionEvent e) {
-                applyLlmSelection();
-                updateStatusLabel();
-            }
-        });
 
         Button selectAllBtn = new Button(buttonBar, SWT.PUSH);
         selectAllBtn.setText("Select All");
