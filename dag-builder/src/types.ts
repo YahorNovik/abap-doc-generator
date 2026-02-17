@@ -184,6 +184,11 @@ export interface TriageResult {
     objectNames: string[];
     subPackage: string;
   }>;
+  tokenUsage: {
+    summaryTokens: number;
+    clusterSummaryTokens: number;
+    triageTokens: number;
+  };
   errors: string[];
 }
 

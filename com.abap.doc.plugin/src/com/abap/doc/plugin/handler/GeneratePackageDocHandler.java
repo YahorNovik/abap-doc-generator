@@ -236,6 +236,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                     Map<String, String> precomputedSummaries = extractSummariesFromTriage(triageJson);
                     Map<String, String> precomputedClusterSummaries = extractClusterSummariesFromTriage(triageJson);
                     Map<String, String[]> precomputedClusterAssignments = extractClusterAssignmentsFromTriage(triageJson);
+                    int triageTokens = extractIntField(triageJson, "triageTokens");
 
                     // Show triage review dialog on UI thread AFTER the job completes
                     display.asyncExec(() -> showTriageReviewAndContinue(
@@ -246,7 +247,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                         maxTotalTokens, templateType, templateCustom,
                         templateMaxWords, templateMaxOutputTokens, userContext,
                         maxSubPackageDepth, excludedObjects,
-                        precomputedSummaries, precomputedClusterSummaries, precomputedClusterAssignments));
+                        precomputedSummaries, precomputedClusterSummaries, precomputedClusterAssignments,
+                        triageTokens));
 
                     return Status.OK_STATUS;
                 } catch (Exception e) {
@@ -277,7 +279,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
             int maxSubPackageDepth, String[] excludedObjects,
             Map<String, String> precomputedSummaries,
             Map<String, String> precomputedClusterSummaries,
-            Map<String, String[]> precomputedClusterAssignments) {
+            Map<String, String[]> precomputedClusterAssignments,
+            int triageTokens) {
 
         TriageReviewDialog triageDialog = new TriageReviewDialog(shell, triageItems);
         if (triageDialog.open() != Window.OK) {
@@ -318,7 +321,7 @@ public class GeneratePackageDocHandler extends AbstractHandler {
 
                     handleGenerationResult(resultJson, packageName, systemUrl, client,
                         username, password, docProvider, docApiKey, docModel, docBaseUrl,
-                        maxTotalTokens, userContext, display, shell);
+                        maxTotalTokens, userContext, display, shell, triageTokens);
 
                     return Status.OK_STATUS;
                 } catch (Exception e) {
@@ -339,8 +342,8 @@ public class GeneratePackageDocHandler extends AbstractHandler {
                                          String systemUrl, String client, String username, String password,
                                          String docProvider, String docApiKey, String docModel, String docBaseUrl,
                                          int maxTotalTokens, String userContext,
-                                         Display display, Shell shell) throws Exception {
-        String tokenInfo = extractPackageTokenUsage(resultJson);
+                                         Display display, Shell shell, int triageTokens) throws Exception {
+        String tokenInfo = extractPackageTokenUsage(resultJson, triageTokens);
         Map<String, String> pages = extractPages(resultJson);
 
         if (!pages.isEmpty()) {
@@ -480,28 +483,19 @@ public class GeneratePackageDocHandler extends AbstractHandler {
         return sb.toString();
     }
 
-    private static String extractPackageTokenUsage(String json) {
-        int summaryTokens = extractIntField(json, "summaryTokens");
+    private static String extractPackageTokenUsage(String json, int triageTokens) {
         int objectDocTokens = extractIntField(json, "objectDocTokens");
-        int clusterSummaryTokens = extractIntField(json, "clusterSummaryTokens");
-        int overviewTokens = extractIntField(json, "overviewTokens");
-        int totalTokens = extractIntField(json, "totalTokens");
+        int totalTokens = extractIntField(json, "totalTokens") + triageTokens;
         int objectCount = extractIntField(json, "objectCount");
         int clusterCount = extractIntField(json, "clusterCount");
 
         StringBuilder sb = new StringBuilder();
         sb.append("Package: ").append(objectCount).append(" objects, ").append(clusterCount).append(" clusters\n\n");
         sb.append("Token Usage:\n");
-        if (summaryTokens > 0) {
-            sb.append("  Summary tokens: ").append(String.format("%,d", summaryTokens)).append("\n");
+        if (triageTokens > 0) {
+            sb.append("  Summarization & triage tokens: ").append(String.format("%,d", triageTokens)).append("\n");
         }
-        sb.append("  Object doc tokens: ").append(String.format("%,d", objectDocTokens)).append("\n");
-        if (clusterSummaryTokens > 0) {
-            sb.append("  Cluster summary tokens: ").append(String.format("%,d", clusterSummaryTokens)).append("\n");
-        }
-        if (overviewTokens > 0) {
-            sb.append("  Overview tokens: ").append(String.format("%,d", overviewTokens)).append("\n");
-        }
+        sb.append("  Documentation tokens: ").append(String.format("%,d", objectDocTokens)).append("\n");
         sb.append("  Total tokens: ").append(String.format("%,d", totalTokens));
         return sb.toString();
     }

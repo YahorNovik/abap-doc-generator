@@ -475,7 +475,7 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
     log(`[triage] Package tree: ${allNodes.length} package(s), ${totalObjects} total objects.`);
 
     if (totalObjects === 0) {
-      return { packageName: input.packageName, objects: [], clusters: [], errors: [...errors, "No relevant custom objects found."] };
+      return { packageName: input.packageName, objects: [], clusters: [], tokenUsage: { summaryTokens: 0, clusterSummaryTokens: 0, triageTokens: 0 }, errors: [...errors, "No relevant custom objects found."] };
     }
 
     // Build a fake PackageDocInput just for processPackageObjects (only summaryLlm used in triage mode)
@@ -493,6 +493,8 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
 
     const allTriageObjects: TriageResult["objects"] = [];
     const allClusters: TriageResult["clusters"] = [];
+    let totalSummaryTokens = 0;
+    let totalClusterSummaryTokens = 0;
 
     // Process root objects
     let rootObjects = tree.objects;
@@ -502,6 +504,8 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
     }
     if (rootObjects.length > 0) {
       const result = await processPackageObjects(client, rootObjects, input.packageName, pseudoInput, errors, excludedSet, { triageOnly: true });
+      totalSummaryTokens += result.tokenUsage.summaryTokens;
+      totalClusterSummaryTokens += result.tokenUsage.clusterSummaryTokens;
       for (const meta of result.triageMetadata ?? []) {
         allTriageObjects.push({ ...meta, subPackage: "" });
       }
@@ -542,6 +546,8 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
         continue;
       }
       const { spNode, result } = spResult.value;
+      totalSummaryTokens += result.tokenUsage.summaryTokens;
+      totalClusterSummaryTokens += result.tokenUsage.clusterSummaryTokens;
       for (const meta of result.triageMetadata ?? []) {
         allTriageObjects.push({ ...meta, subPackage: spNode.name });
       }
@@ -555,7 +561,13 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
       }
     }
 
-    return { packageName: input.packageName, objects: allTriageObjects, clusters: allClusters, errors };
+    return {
+      packageName: input.packageName,
+      objects: allTriageObjects,
+      clusters: allClusters,
+      tokenUsage: { summaryTokens: totalSummaryTokens, clusterSummaryTokens: totalClusterSummaryTokens, triageTokens: totalSummaryTokens + totalClusterSummaryTokens },
+      errors,
+    };
   } finally {
     try { await client.disconnect(); } catch { /* ignore */ }
   }
