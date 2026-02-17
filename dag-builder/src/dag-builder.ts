@@ -202,14 +202,24 @@ export async function fetchSourceForNodes(
   client: AdtClientWrapper,
   nodes: Array<{ name: string; type: string; uri?: string }>,
   errors: string[],
+  concurrency: number = 5,
 ): Promise<Map<string, string>> {
   const sources = new Map<string, string>();
-  for (const node of nodes) {
-    try {
-      const source = await client.fetchSource(node.name, node.uri);
-      sources.set(node.name, source);
-    } catch (err) {
-      errors.push(`Failed to fetch source for ${node.name}: ${String(err)}`);
+  for (let i = 0; i < nodes.length; i += concurrency) {
+    const batch = nodes.slice(i, i + concurrency);
+    const results = await Promise.allSettled(
+      batch.map(async (node) => {
+        const source = await client.fetchSource(node.name, node.uri);
+        return { name: node.name, source };
+      }),
+    );
+    for (let j = 0; j < results.length; j++) {
+      const result = results[j];
+      if (result.status === "fulfilled") {
+        sources.set(result.value.name, result.value.source);
+      } else {
+        errors.push(`Failed to fetch source for ${batch[j].name}: ${String(result.reason)}`);
+      }
     }
   }
   return sources;
