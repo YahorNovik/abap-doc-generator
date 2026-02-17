@@ -707,7 +707,8 @@ export function assembleHierarchicalHtmlWiki(
         .filter((o) => rootObjectDocs[o.name] || rootSummaries[o.name] || o.description)
         .sort((a, b) => (topoIndex.get(b.name) ?? 0) - (topoIndex.get(a.name) ?? 0));
       for (const obj of linkedObjects) {
-        const summary = rootSummaries[obj.name] || obj.description || "";
+        const overview = rootObjectDocs[obj.name] ? extractOverview(rootObjectDocs[obj.name]) : undefined;
+        const summary = overview || rootSummaries[obj.name] || obj.description || "";
         const nameHtml = rootObjectsWithPages.has(obj.name)
           ? `<a href="${obj.name}.html">${escapeHtml(obj.name)}</a>`
           : `<strong>${escapeHtml(obj.name)}</strong>`;
@@ -717,7 +718,11 @@ export function assembleHierarchicalHtmlWiki(
           + `<span class="obj-type">(${escapeHtml(obj.type)})</span></div>`,
         );
         if (summary) {
-          rootParts.push(`<p class="obj-summary">${escapeHtml(summary)}</p>`);
+          if (overview) {
+            rootParts.push(`<div class="obj-summary">${markdownToHtml(summary)}</div>`);
+          } else {
+            rootParts.push(`<p class="obj-summary">${escapeHtml(summary)}</p>`);
+          }
         }
         rootParts.push(`</div>`);
       }
