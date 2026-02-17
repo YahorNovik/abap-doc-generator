@@ -126,7 +126,9 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         Composite parent = getFieldEditorParent();
         Button manageBtn = new Button(parent, SWT.PUSH);
         manageBtn.setText("Manage Templates...");
-        manageBtn.setLayoutData(new GridData(SWT.LEFT, SWT.CENTER, false, false));
+        GridData btnData = new GridData(SWT.LEFT, SWT.CENTER, false, false);
+        btnData.horizontalSpan = 2;
+        manageBtn.setLayoutData(btnData);
         manageBtn.addSelectionListener(new SelectionAdapter() {
             @Override
             public void widgetSelected(SelectionEvent e) {
@@ -148,11 +150,8 @@ public class ConnectionPreferencePage extends FieldEditorPreferencePage implemen
         String json = store.getString(PREF_CUSTOM_TEMPLATES);
         List<TemplateItem> templates = TemplateManagerDialog.parseTemplatesJson(json);
 
-        // Always include the three built-in options
         List<String[]> options = new ArrayList<>();
         options.add(new String[] { "Default", "Default" });
-        options.add(new String[] { "Minimal", "Minimal" });
-        options.add(new String[] { "Detailed", "Detailed" });
 
         // Add custom templates (skip built-in duplicates)
         for (TemplateItem t : templates) {
