@@ -260,57 +260,76 @@ async function processPackageObjects(
 
     // In triage-only mode, skip full doc generation
     if (!options?.triageOnly) {
-      // Generate individual object docs (only for triaged objects, skip excluded)
+      // Collect objects that need doc generation
+      const docCandidates: PackageObject[] = [];
       for (const obj of cluster.objects) {
         if (excludedSet?.has(obj.name)) continue;
         if (!triageSet.has(obj.name)) {
           log(`  Skipping doc for ${obj.name} (triage: summary only).`);
           continue;
         }
-        const source = sources.get(obj.name);
-        // For DDIC objects without source, use description as pseudo-source
-        const effectiveSource = source || `* ${obj.type} object: ${obj.name}\n* Description: ${obj.description || "No description available"}`;
+        docCandidates.push(obj);
+      }
 
-        const dagNode: DagNode = {
-          name: obj.name, type: obj.type, isCustom: true, sourceAvailable: !!source,
-          usedBy: cluster.internalEdges.filter((e) => e.to === obj.name).map((e) => e.from),
-        };
-        const edges = edgesByFrom.get(obj.name) ?? [];
-        const depDetails = edges.filter((e) => summaries[e.to]).map((e) => ({
-          name: e.to, type: objectMap.get(e.to)?.type ?? "UNKNOWN", summary: summaries[e.to],
-          usedMembers: e.references.map((r) => ({ memberName: r.memberName, memberType: r.memberType })),
-        }));
-        const internalWhereUsed = cluster.internalEdges
-          .filter((e) => e.to === obj.name)
-          .map((e) => ({ name: e.from, type: objectMap.get(e.from)?.type ?? "UNKNOWN", description: "Package-internal reference" }));
+      // Generate docs concurrently (batches of DOC_CONCURRENCY)
+      const DOC_CONCURRENCY = 3;
+      log(`  Generating docs for ${docCandidates.length} objects (concurrency: ${DOC_CONCURRENCY})...`);
 
-        const template = resolveTemplate(input.templateType, input.templateCustom, obj.type, input.templateMaxWords, input.templateMaxOutputTokens);
-        const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
-        const docMessages = buildDocPrompt(dagNode, effectiveSource, depDetails, template, internalWhereUsed, input.userContext);
+      for (let di = 0; di < docCandidates.length; di += DOC_CONCURRENCY) {
+        const batch = docCandidates.slice(di, di + DOC_CONCURRENCY);
+        const docResults = await Promise.allSettled(
+          batch.map(async (obj) => {
+            const source = sources.get(obj.name);
+            const effectiveSource = source || `* ${obj.type} object: ${obj.name}\n* Description: ${obj.description || "No description available"}`;
 
-        const toolExecutor = async (tc: ToolCall): Promise<string> => {
-          switch (tc.name) {
-            case "get_source":
-              try { return await client.fetchSource(tc.arguments.object_name); }
-              catch (err) { return `Error: ${String(err)}`; }
-            case "get_where_used":
-              try {
-                const refs = await client.getWhereUsed(tc.arguments.object_name);
-                if (refs.length === 0) return "No where-used references found.";
-                return refs.map((r) => `${r.name} (${r.type}): ${r.description}`).join("\n");
-              } catch (err) { return `Error: ${String(err)}`; }
-            default: return `Unknown tool: ${tc.name}`;
+            const dagNode: DagNode = {
+              name: obj.name, type: obj.type, isCustom: true, sourceAvailable: !!source,
+              usedBy: cluster.internalEdges.filter((e) => e.to === obj.name).map((e) => e.from),
+            };
+            const edges = edgesByFrom.get(obj.name) ?? [];
+            const depDetails = edges.filter((e) => summaries[e.to]).map((e) => ({
+              name: e.to, type: objectMap.get(e.to)?.type ?? "UNKNOWN", summary: summaries[e.to],
+              usedMembers: e.references.map((r) => ({ memberName: r.memberName, memberType: r.memberType })),
+            }));
+            const internalWhereUsed = cluster.internalEdges
+              .filter((e) => e.to === obj.name)
+              .map((e) => ({ name: e.from, type: objectMap.get(e.from)?.type ?? "UNKNOWN", description: "Package-internal reference" }));
+
+            const template = resolveTemplate(input.templateType, input.templateCustom, obj.type, input.templateMaxWords, input.templateMaxOutputTokens);
+            const docConfig: LlmConfig = { ...input.docLlm, maxTokens: template.maxOutputTokens };
+            const docMessages = buildDocPrompt(dagNode, effectiveSource, depDetails, template, internalWhereUsed, input.userContext);
+
+            const toolExecutor = async (tc: ToolCall): Promise<string> => {
+              switch (tc.name) {
+                case "get_source":
+                  try { return await client.fetchSource(tc.arguments.object_name); }
+                  catch (err) { return `Error: ${String(err)}`; }
+                case "get_where_used":
+                  try {
+                    const refs = await client.getWhereUsed(tc.arguments.object_name);
+                    if (refs.length === 0) return "No where-used references found.";
+                    return refs.map((r) => `${r.name} (${r.type}): ${r.description}`).join("\n");
+                  } catch (err) { return `Error: ${String(err)}`; }
+                default: return `Unknown tool: ${tc.name}`;
+              }
+            };
+
+            log(`  Generating doc for ${obj.name}...`);
+            const response = await callLlmAgentLoop(docConfig, docMessages, AGENT_TOOLS, toolExecutor, DOC_AGENT_MAX_ITERATIONS, 0);
+            return { name: obj.name, response };
+          }),
+        );
+
+        for (let j = 0; j < docResults.length; j++) {
+          const result = docResults[j];
+          const objName = batch[j].name;
+          if (result.status === "fulfilled") {
+            objectDocs[result.value.name] = result.value.response.content;
+            objectDocTokens += result.value.response.usage.promptTokens + result.value.response.usage.completionTokens;
+          } else {
+            objectDocs[objName] = `Documentation generation failed: ${String(result.reason)}`;
+            errors.push(`Failed to generate doc for ${objName}: ${String(result.reason)}`);
           }
-        };
-
-        try {
-          log(`  Generating doc for ${obj.name}...`);
-          const response = await callLlmAgentLoop(docConfig, docMessages, AGENT_TOOLS, toolExecutor, DOC_AGENT_MAX_ITERATIONS, 0);
-          objectDocs[obj.name] = response.content;
-          objectDocTokens += response.usage.promptTokens + response.usage.completionTokens;
-        } catch (err) {
-          objectDocs[obj.name] = `Documentation generation failed: ${String(err)}`;
-          errors.push(`Failed to generate doc for ${obj.name}: ${String(err)}`);
         }
       }
     }
@@ -550,67 +569,57 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
     let totalSummaryTokens = 0;
     let totalClusterSummaryTokens = 0;
 
-    // Process root objects
+    // Build tasks for root + sub-packages to process concurrently
+    const tasks: Array<{ label: string; subPackage: string; objects: PackageObject[] }> = [];
+
     let rootObjects = tree.objects;
     if (rootObjects.length > MAX_PACKAGE_OBJECTS) {
       errors.push(`Root package has ${rootObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
       rootObjects = rootObjects.slice(0, MAX_PACKAGE_OBJECTS);
     }
     if (rootObjects.length > 0) {
-      const result = await processPackageObjects(client, rootObjects, input.packageName, pseudoInput, errors, excludedSet, { triageOnly: true });
-      totalSummaryTokens += result.tokenUsage.summaryTokens;
-      totalClusterSummaryTokens += result.tokenUsage.clusterSummaryTokens;
-      for (const meta of result.triageMetadata ?? []) {
-        allTriageObjects.push({ ...meta, subPackage: "" });
-      }
-      for (const cluster of result.clusters) {
-        allClusters.push({
-          name: cluster.name,
-          summary: result.clusterSummaries[cluster.name] || "",
-          objectNames: cluster.objects.map((o) => o.name),
-          subPackage: "",
-        });
-      }
+      tasks.push({ label: input.packageName, subPackage: "", objects: rootObjects });
     }
 
-    // Process sub-packages in parallel (skip those where all objects are excluded)
-    const eligibleSubPackages = subPackagesWithObjects.filter((spNode) => {
+    for (const spNode of subPackagesWithObjects) {
       if (excludedSet && spNode.objects.every((o) => excludedSet.has(o.name))) {
         log(`[triage] Skipping sub-package ${spNode.name} — all ${spNode.objects.length} objects excluded`);
-        return false;
+        continue;
       }
-      return true;
-    });
+      let spObjects = spNode.objects;
+      if (spObjects.length > MAX_PACKAGE_OBJECTS) {
+        errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
+        spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
+      }
+      tasks.push({ label: spNode.name, subPackage: spNode.name, objects: spObjects });
+    }
 
-    const spResults = await Promise.allSettled(
-      eligibleSubPackages.map(async (spNode) => {
-        let spObjects = spNode.objects;
-        if (spObjects.length > MAX_PACKAGE_OBJECTS) {
-          errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
-          spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
-        }
-        const result = await processPackageObjects(client, spObjects, spNode.name, pseudoInput, errors, excludedSet, { triageOnly: true });
-        return { spNode, result };
+    // Process all packages concurrently
+    log(`[triage] Processing ${tasks.length} package(s) concurrently...`);
+    const allResults = await Promise.allSettled(
+      tasks.map(async (task) => {
+        const result = await processPackageObjects(client, task.objects, task.label, pseudoInput, errors, excludedSet, { triageOnly: true });
+        return { task, result };
       }),
     );
 
-    for (const spResult of spResults) {
-      if (spResult.status === "rejected") {
-        errors.push(`Sub-package processing failed: ${String(spResult.reason)}`);
+    for (const entry of allResults) {
+      if (entry.status === "rejected") {
+        errors.push(`Package processing failed: ${String(entry.reason)}`);
         continue;
       }
-      const { spNode, result } = spResult.value;
+      const { task, result } = entry.value;
       totalSummaryTokens += result.tokenUsage.summaryTokens;
       totalClusterSummaryTokens += result.tokenUsage.clusterSummaryTokens;
       for (const meta of result.triageMetadata ?? []) {
-        allTriageObjects.push({ ...meta, subPackage: spNode.name });
+        allTriageObjects.push({ ...meta, subPackage: task.subPackage });
       }
       for (const cluster of result.clusters) {
         allClusters.push({
           name: cluster.name,
           summary: result.clusterSummaries[cluster.name] || "",
           objectNames: cluster.objects.map((o) => o.name),
-          subPackage: spNode.name,
+          subPackage: task.subPackage,
         });
       }
     }
@@ -715,65 +724,71 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
 
     } else {
       // ─── HIERARCHICAL FLOW (sub-packages present) ───
-      log(`Processing ${subPackagesWithObjects.length} sub-package(s) + root objects...`);
+      log(`Processing ${subPackagesWithObjects.length} sub-package(s) + root objects concurrently...`);
 
-      // Process root objects (if any)
-      let rootResult: ProcessResult | undefined;
-      let rootExternalDeps: Array<{ name: string; type: string; usedBy: string[] }> = [];
+      // Build tasks for root + sub-packages to process concurrently
+      interface PkgTask { label: string; objects: PackageObject[]; spNode?: SubPackageNode; scopedOpts?: ProcessOptions }
+      const tasks: PkgTask[] = [];
+
       if (rootObjects.length > 0) {
-        log(`Processing root package objects (${rootObjects.length})...`);
-        rootResult = await processPackageObjects(client, rootObjects, input.packageName, input, errors, excludedSet, buildScopedOpts());
-        rootExternalDeps = aggregateExternalDeps(rootResult.graph);
+        tasks.push({ label: input.packageName, objects: rootObjects, scopedOpts: buildScopedOpts() });
       }
-
-      // Process each sub-package
-      const spRenderData: SubPackageRenderData[] = [];
-      let totalSummaryTokens = rootResult?.tokenUsage.summaryTokens ?? 0;
-      let totalObjectDocTokens = rootResult?.tokenUsage.objectDocTokens ?? 0;
-      let totalClusterSummaryTokens = rootResult?.tokenUsage.clusterSummaryTokens ?? 0;
-
-      const eligibleSpNodes = subPackagesWithObjects.filter((spNode) => {
+      for (const spNode of subPackagesWithObjects) {
         if (excludedSet && spNode.objects.every((o) => excludedSet.has(o.name))) {
           log(`Skipping sub-package ${spNode.name} — all ${spNode.objects.length} objects excluded`);
-          return false;
+          continue;
         }
-        return true;
-      });
+        let spObjects = spNode.objects;
+        if (spObjects.length > MAX_PACKAGE_OBJECTS) {
+          errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
+          spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
+        }
+        tasks.push({ label: spNode.name, objects: spObjects, spNode, scopedOpts: buildScopedOpts(spNode.name) });
+      }
 
-      const spResultEntries = await Promise.allSettled(
-        eligibleSpNodes.map(async (spNode) => {
-          let spObjects = spNode.objects;
-          if (spObjects.length > MAX_PACKAGE_OBJECTS) {
-            errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
-            spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
-          }
-          log(`Processing sub-package ${spNode.name} (${spObjects.length} objects)...`);
-          const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet, buildScopedOpts(spNode.name));
-          return { spNode, spResult };
+      log(`Processing ${tasks.length} package(s) concurrently...`);
+      const allResults = await Promise.allSettled(
+        tasks.map(async (task) => {
+          log(`Processing ${task.label} (${task.objects.length} objects)...`);
+          const result = await processPackageObjects(client, task.objects, task.label, input, errors, excludedSet, task.scopedOpts);
+          return { task, result };
         }),
       );
 
-      for (const entry of spResultEntries) {
+      // Collect results
+      let rootResult: ProcessResult | undefined;
+      let rootExternalDeps: Array<{ name: string; type: string; usedBy: string[] }> = [];
+      const spRenderData: SubPackageRenderData[] = [];
+      let totalSummaryTokens = 0;
+      let totalObjectDocTokens = 0;
+      let totalClusterSummaryTokens = 0;
+
+      for (const entry of allResults) {
         if (entry.status === "rejected") {
-          errors.push(`Sub-package processing failed: ${String(entry.reason)}`);
+          errors.push(`Package processing failed: ${String(entry.reason)}`);
           continue;
         }
-        const { spNode, spResult } = entry.value;
-        const spExternalDeps = aggregateExternalDeps(spResult.graph);
+        const { task, result } = entry.value;
+        totalSummaryTokens += result.tokenUsage.summaryTokens;
+        totalObjectDocTokens += result.tokenUsage.objectDocTokens;
+        totalClusterSummaryTokens += result.tokenUsage.clusterSummaryTokens;
 
-        spRenderData.push({
-          node: spNode,
-          clusters: spResult.clusters,
-          clusterSummaries: spResult.clusterSummaries,
-          objectDocs: spResult.objectDocs,
-          summaries: spResult.summaries,
-          subPackageSummary: "",
-          externalDeps: spExternalDeps,
-        });
-
-        totalSummaryTokens += spResult.tokenUsage.summaryTokens;
-        totalObjectDocTokens += spResult.tokenUsage.objectDocTokens;
-        totalClusterSummaryTokens += spResult.tokenUsage.clusterSummaryTokens;
+        if (!task.spNode) {
+          // Root package result
+          rootResult = result;
+          rootExternalDeps = aggregateExternalDeps(result.graph);
+        } else {
+          // Sub-package result
+          spRenderData.push({
+            node: task.spNode,
+            clusters: result.clusters,
+            clusterSummaries: result.clusterSummaries,
+            objectDocs: result.objectDocs,
+            summaries: result.summaries,
+            subPackageSummary: "",
+            externalDeps: aggregateExternalDeps(result.graph),
+          });
+        }
       }
 
       // Assemble all outputs

@@ -334,20 +334,27 @@ export async function discoverPackageTree(
 
   pkgLog(`  ${packageName}: ${objects.length} objects, ${subPackageEntries.length} sub-packages.`);
 
-  // Recurse into sub-packages if within depth limit
+  // Recurse into sub-packages if within depth limit (in parallel)
   const children: SubPackageNode[] = [];
   if (currentDepth < maxDepth && subPackageEntries.length > 0) {
-    for (const sp of subPackageEntries) {
-      pkgLog(`  Recursing into sub-package ${sp.objectName}...`);
-      try {
+    pkgLog(`  Recursing into ${subPackageEntries.length} sub-package(s) in parallel...`);
+    const results = await Promise.allSettled(
+      subPackageEntries.map(async (sp) => {
         const child = await discoverPackageTree(
           client, sp.objectName.toUpperCase(), maxDepth, errors, currentDepth + 1,
         );
         child.description = sp.description;
-        children.push(child);
-      } catch (err) {
-        errors.push(`Failed to fetch sub-package ${sp.objectName}: ${String(err)}`);
-        pkgLog(`  WARN: Sub-package ${sp.objectName} failed: ${String(err)}`);
+        return child;
+      }),
+    );
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status === "fulfilled") {
+        children.push(result.value);
+      } else {
+        const spName = subPackageEntries[i].objectName;
+        errors.push(`Failed to fetch sub-package ${spName}: ${String(result.reason)}`);
+        pkgLog(`  WARN: Sub-package ${spName} failed: ${String(result.reason)}`);
       }
     }
   } else if (subPackageEntries.length > 0) {
