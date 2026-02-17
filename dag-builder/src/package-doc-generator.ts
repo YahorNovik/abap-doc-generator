@@ -515,18 +515,33 @@ export async function triagePackage(input: TriageInput): Promise<TriageResult> {
       }
     }
 
-    // Process sub-packages (skip those where all objects are excluded)
-    for (const spNode of subPackagesWithObjects) {
+    // Process sub-packages in parallel (skip those where all objects are excluded)
+    const eligibleSubPackages = subPackagesWithObjects.filter((spNode) => {
       if (excludedSet && spNode.objects.every((o) => excludedSet.has(o.name))) {
         log(`[triage] Skipping sub-package ${spNode.name} — all ${spNode.objects.length} objects excluded`);
+        return false;
+      }
+      return true;
+    });
+
+    const spResults = await Promise.allSettled(
+      eligibleSubPackages.map(async (spNode) => {
+        let spObjects = spNode.objects;
+        if (spObjects.length > MAX_PACKAGE_OBJECTS) {
+          errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
+          spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
+        }
+        const result = await processPackageObjects(client, spObjects, spNode.name, pseudoInput, errors, excludedSet, { triageOnly: true });
+        return { spNode, result };
+      }),
+    );
+
+    for (const spResult of spResults) {
+      if (spResult.status === "rejected") {
+        errors.push(`Sub-package processing failed: ${String(spResult.reason)}`);
         continue;
       }
-      let spObjects = spNode.objects;
-      if (spObjects.length > MAX_PACKAGE_OBJECTS) {
-        errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
-        spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
-      }
-      const result = await processPackageObjects(client, spObjects, spNode.name, pseudoInput, errors, excludedSet, { triageOnly: true });
+      const { spNode, result } = spResult.value;
       for (const meta of result.triageMetadata ?? []) {
         allTriageObjects.push({ ...meta, subPackage: spNode.name });
       }
@@ -645,20 +660,33 @@ export async function generatePackageDocumentation(input: PackageDocInput): Prom
       let totalObjectDocTokens = rootResult?.tokenUsage.objectDocTokens ?? 0;
       let totalClusterSummaryTokens = rootResult?.tokenUsage.clusterSummaryTokens ?? 0;
 
-      for (const spNode of subPackagesWithObjects) {
-        // Skip sub-packages where all objects are excluded
+      const eligibleSpNodes = subPackagesWithObjects.filter((spNode) => {
         if (excludedSet && spNode.objects.every((o) => excludedSet.has(o.name))) {
           log(`Skipping sub-package ${spNode.name} — all ${spNode.objects.length} objects excluded`);
+          return false;
+        }
+        return true;
+      });
+
+      const spResultEntries = await Promise.allSettled(
+        eligibleSpNodes.map(async (spNode) => {
+          let spObjects = spNode.objects;
+          if (spObjects.length > MAX_PACKAGE_OBJECTS) {
+            errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
+            spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
+          }
+          log(`Processing sub-package ${spNode.name} (${spObjects.length} objects)...`);
+          const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet, buildScopedOpts(spNode.name));
+          return { spNode, spResult };
+        }),
+      );
+
+      for (const entry of spResultEntries) {
+        if (entry.status === "rejected") {
+          errors.push(`Sub-package processing failed: ${String(entry.reason)}`);
           continue;
         }
-        let spObjects = spNode.objects;
-        if (spObjects.length > MAX_PACKAGE_OBJECTS) {
-          errors.push(`Sub-package ${spNode.name} has ${spObjects.length} objects; capping to ${MAX_PACKAGE_OBJECTS}.`);
-          spObjects = spObjects.slice(0, MAX_PACKAGE_OBJECTS);
-        }
-
-        log(`Processing sub-package ${spNode.name} (${spObjects.length} objects)...`);
-        const spResult = await processPackageObjects(client, spObjects, spNode.name, input, errors, excludedSet, buildScopedOpts(spNode.name));
+        const { spNode, spResult } = entry.value;
         const spExternalDeps = aggregateExternalDeps(spResult.graph);
 
         spRenderData.push({
