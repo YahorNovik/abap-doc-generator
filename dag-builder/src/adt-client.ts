@@ -1,5 +1,4 @@
 import { ADTClient, SearchResult, UsageReference } from "abap-adt-api";
-import { CdsDependency } from "./types";
 
 export class AdtClientWrapper {
   private client: ADTClient;
@@ -106,40 +105,9 @@ export class AdtClientWrapper {
   }
 
   /**
-   * Fetches CDS view dependencies via the ADT test double framework endpoint.
-   * Returns a flat list of data sources (tables, other CDS views) that the view depends on.
-   */
-  async getCdsDependencies(ddlsName: string): Promise<CdsDependency[]> {
-    const url = `/sap/bc/adt/testcodegen/dependencies/doubledata?ddlsourceName=${encodeURIComponent(ddlsName)}`;
-    const response = await this.client.httpClient.request(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/vnd.sap.adt.codegen.data.v1+xml",
-      },
-    });
-
-    return parseCdsDependencyXml(response.body);
-  }
-
-  /**
    * Converts ADT search result type (e.g., "CLAS/OC") to simple type ("CLAS").
    */
   private adtTypeToAbapType(adtType: string): string {
     return adtType.split("/")[0];
   }
-}
-
-/**
- * Parses the XML response from the CDS test double dependency endpoint.
- * Extracts dependency names and types (TABLE, CDS_VIEW, VIEW).
- */
-function parseCdsDependencyXml(xml: string): CdsDependency[] {
-  const deps: CdsDependency[] = [];
-  // Match <double double_name="..." double_type="..."/>
-  const doubleRegex = /double_name="([^"]+)"\s+double_type="([^"]+)"/g;
-  let match: RegExpExecArray | null;
-  while ((match = doubleRegex.exec(xml)) !== null) {
-    deps.push({ name: match[1].toUpperCase(), type: match[2] });
-  }
-  return deps;
 }

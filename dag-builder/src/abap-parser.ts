@@ -8,8 +8,12 @@ import {
   Config,
   Statements,
   Expressions,
+  CDSParser,
 } from "@abaplint/core";
-import { ParsedDependency, MemberReference, CdsDependency } from "./types";
+import { ParsedDependency, MemberReference } from "./types";
+
+// Import CDS expression types for AST traversal
+const CDSExpressions = require("@abaplint/core/build/src/cds/expressions");
 import { buildAbapGitFilename } from "./classifier";
 
 interface ScopeNode {
@@ -45,15 +49,10 @@ export function extractDependencies(
   source: string,
   objectName: string,
   objectType: string,
-  cdsDependencies?: CdsDependency[],
 ): ParsedDependency[] {
-  // CDS-family objects: use ADT-provided dependencies instead of abaplint
-  if (CDS_TYPES.has(objectType) && cdsDependencies) {
-    return convertCdsDependencies(cdsDependencies, objectName);
-  }
-  // CDS objects without ADT deps: skip abaplint (it can't parse DDL)
+  // CDS-family objects: parse with abaplint CDS parser or regex
   if (CDS_TYPES.has(objectType)) {
-    return [];
+    return extractCdsFamilyDependencies(source, objectName, objectType);
   }
   const filename = buildAbapGitFilename(objectName, objectType);
   const file = new MemoryFile(filename, source);
@@ -318,45 +317,255 @@ function mapOoType(ooType: string): string {
   }
 }
 
-// ─── CDS dependency conversion ───
+// ─── CDS family dependency extraction ───
 
-/** Maps ADT CDS dependency node types to ABAP object types. */
-function mapCdsNodeType(nodeType: string): string {
-  switch (nodeType) {
-    case "TABLE":
-      return "TABL";
-    case "CDS_VIEW":
-    case "CDS_DB_VIEW":
-      return "DDLS";
-    case "VIEW":
-      return "VIEW";
+/**
+ * Extracts dependencies from CDS-family objects (DDLS, DDLX, BDEF, SRVD, DCLS).
+ * Uses abaplint CDSParser for DDLS/DDLX, regex for BDEF/SRVD/DCLS.
+ */
+function extractCdsFamilyDependencies(
+  source: string,
+  objectName: string,
+  objectType: string,
+): ParsedDependency[] {
+  switch (objectType) {
+    case "DDLS":
+      return extractDdlsDependencies(source, objectName);
+    case "DDLX":
+      return []; // Metadata extensions only add UI annotations — no data flow dependencies
+    case "BDEF":
+      return extractBdefDependencies(source, objectName);
+    case "SRVD":
+      return extractSrvdDependencies(source, objectName);
+    case "DCLS":
+      return extractDclsDependencies(source, objectName);
     default:
-      return "TABL"; // conservative fallback
+      return [];
+  }
+}
+
+/** Helper to add a dependency to a map, avoiding duplicates. */
+function addDep(
+  depMap: Map<string, ParsedDependency>,
+  name: string,
+  objectType: string,
+  memberName: string,
+  memberType: MemberReference["memberType"],
+): void {
+  const key = name.toUpperCase();
+  let dep = depMap.get(key);
+  if (!dep) {
+    dep = { objectName: key, objectType, members: [] };
+    depMap.set(key, dep);
+  }
+  if (!dep.members.some((m) => m.memberName === memberName && m.memberType === memberType)) {
+    dep.members.push({ memberName, memberType });
   }
 }
 
 /**
- * Converts pre-fetched CDS dependencies (from ADT endpoint) to ParsedDependency format.
+ * Extract entity name from a CDSSource or CDSRelation expression node.
+ * CDSSource: CDSName [CDSParametersSelect] [CDSAs | CDSName]
+ * CDSRelation: [/ns/] name [CDSAs]
+ * The entity name is the first CDSName child's first token.
  */
-function convertCdsDependencies(
-  cdsDeps: CdsDependency[],
-  selfName: string,
-): ParsedDependency[] {
+function extractEntityName(node: any): string | undefined {
+  // Try CDSName first child
+  const cdsName = node.findDirectExpression?.(CDSExpressions.CDSName);
+  if (cdsName) {
+    return cdsName.concatTokens().replace(/^:/, "").toUpperCase();
+  }
+  // Fallback: first token
+  try {
+    return node.getFirstToken().getStr().toUpperCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Parses DDLS (CDS view) source using abaplint's CDSParser.
+ * Extracts: data sources (FROM), joins, associations, compositions.
+ */
+function extractDdlsDependencies(source: string, objectName: string): ParsedDependency[] {
   const depMap = new Map<string, ParsedDependency>();
+  const selfName = objectName.toUpperCase();
 
-  for (const dep of cdsDeps) {
-    const key = dep.name.toUpperCase();
-    if (key === selfName.toUpperCase()) continue;
+  const file = new MemoryFile("source.ddls.asddls", source);
+  const parser = new CDSParser();
+  const tree = parser.parse(file);
+  if (!tree) return [];
 
-    if (!depMap.has(key)) {
-      depMap.set(key, {
-        objectName: key,
-        objectType: mapCdsNodeType(dep.type),
-        members: [{
-          memberName: key,
-          memberType: "datasource",
-        }],
-      });
+  // Data sources (FROM clause)
+  const sources = tree.findAllExpressionsRecursive(CDSExpressions.CDSSource);
+  for (const src of sources) {
+    const name = extractEntityName(src);
+    if (name && name !== selfName) {
+      addDep(depMap, name, "DDLS", name, "datasource");
+    }
+  }
+
+  // Joins
+  const joins = tree.findAllExpressionsRecursive(CDSExpressions.CDSJoin);
+  for (const join of joins) {
+    // CDSJoin contains CDSSource which we already captured above,
+    // but let's also check for any CDSSource children specifically
+    const joinSources = join.findAllExpressionsRecursive(CDSExpressions.CDSSource);
+    for (const src of joinSources) {
+      const name = extractEntityName(src);
+      if (name && name !== selfName) {
+        addDep(depMap, name, "DDLS", name, "datasource");
+      }
+    }
+  }
+
+  // Associations
+  const associations = tree.findAllExpressionsRecursive(CDSExpressions.CDSAssociation);
+  for (const assoc of associations) {
+    const relation = assoc.findDirectExpression?.(CDSExpressions.CDSRelation);
+    if (relation) {
+      const name = extractEntityName(relation);
+      if (name && name !== selfName) {
+        // Try to get alias
+        const alias = relation.findDirectExpression?.(CDSExpressions.CDSAs);
+        const aliasName = alias ? alias.concatTokens().replace(/^AS\s+/i, "").trim() : name;
+        addDep(depMap, name, "DDLS", aliasName, "association");
+      }
+    }
+  }
+
+  // Compositions
+  const compositions = tree.findAllExpressionsRecursive(CDSExpressions.CDSComposition);
+  for (const comp of compositions) {
+    const relation = comp.findDirectExpression?.(CDSExpressions.CDSRelation);
+    if (relation) {
+      const name = extractEntityName(relation);
+      if (name && name !== selfName) {
+        addDep(depMap, name, "DDLS", name, "association");
+      }
+    }
+  }
+
+  return Array.from(depMap.values());
+}
+
+/**
+ * Parses DDLX (metadata extension) source using abaplint's CDSParser.
+ * Extracts: target view being annotated.
+ */
+function extractDdlxDependencies(source: string, objectName: string): ParsedDependency[] {
+  const depMap = new Map<string, ParsedDependency>();
+  const selfName = objectName.toUpperCase();
+
+  const file = new MemoryFile("source.ddlx.asddlxs", source);
+  const parser = new CDSParser();
+  const tree = parser.parse(file);
+
+  if (tree) {
+    // CDSAnnotate: ANNOTATE (ENTITY|VIEW) CDSName WITH { ... }
+    const cdsNames = tree.findAllExpressionsRecursive(CDSExpressions.CDSName);
+    // The first CDSName after ANNOTATE ENTITY/VIEW is the target
+    if (cdsNames.length > 0) {
+      const name = cdsNames[0].concatTokens().replace(/^:/, "").toUpperCase();
+      if (name && name !== selfName) {
+        addDep(depMap, name, "DDLS", name, "datasource");
+      }
+    }
+  } else {
+    // Fallback: regex
+    const match = source.match(/annotate\s+(?:view|entity)\s+(\S+)/i);
+    if (match) {
+      const name = match[1].toUpperCase();
+      if (name !== selfName) {
+        addDep(depMap, name, "DDLS", name, "datasource");
+      }
+    }
+  }
+
+  return Array.from(depMap.values());
+}
+
+/**
+ * Parses BDEF (behavior definition) source using regex.
+ * Extracts: implementation class, CDS entity references.
+ */
+function extractBdefDependencies(source: string, objectName: string): ParsedDependency[] {
+  const depMap = new Map<string, ParsedDependency>();
+  const selfName = objectName.toUpperCase();
+
+  // implementation in class <class_name> [unique]
+  const implMatches = source.matchAll(/implementation\s+in\s+class\s+(\S+)/gi);
+  for (const m of implMatches) {
+    const name = m[1].toUpperCase();
+    if (name !== selfName) {
+      addDep(depMap, name, "CLAS", name, "datasource");
+    }
+  }
+
+  // define behavior for <entity_name>
+  const behaviorMatches = source.matchAll(/define\s+behavior\s+for\s+(\S+)/gi);
+  for (const m of behaviorMatches) {
+    const name = m[1].toUpperCase();
+    if (name !== selfName) {
+      addDep(depMap, name, "DDLS", name, "association");
+    }
+  }
+
+  // use draft; / with draft; references — extract draft table if present
+  const draftMatches = source.matchAll(/draft\s+table\s+(\S+)/gi);
+  for (const m of draftMatches) {
+    const name = m[1].toUpperCase();
+    if (name !== selfName) {
+      addDep(depMap, name, "TABL", name, "datasource");
+    }
+  }
+
+  // persistent table <table_name>
+  const persistentMatches = source.matchAll(/persistent\s+table\s+(\S+)/gi);
+  for (const m of persistentMatches) {
+    const name = m[1].toUpperCase();
+    if (name !== selfName) {
+      addDep(depMap, name, "TABL", name, "datasource");
+    }
+  }
+
+  return Array.from(depMap.values());
+}
+
+/**
+ * Parses SRVD (service definition) source using regex.
+ * Extracts: exposed CDS entities.
+ */
+function extractSrvdDependencies(source: string, objectName: string): ParsedDependency[] {
+  const depMap = new Map<string, ParsedDependency>();
+  const selfName = objectName.toUpperCase();
+
+  // expose <entity_name> [as <alias>]
+  const exposeMatches = source.matchAll(/expose\s+(\S+)/gi);
+  for (const m of exposeMatches) {
+    const name = m[1].toUpperCase();
+    if (name !== selfName && name !== "AS") {
+      addDep(depMap, name, "DDLS", name, "datasource");
+    }
+  }
+
+  return Array.from(depMap.values());
+}
+
+/**
+ * Parses DCLS (access control) source using regex.
+ * Extracts: protected CDS entity.
+ */
+function extractDclsDependencies(source: string, objectName: string): ParsedDependency[] {
+  const depMap = new Map<string, ParsedDependency>();
+  const selfName = objectName.toUpperCase();
+
+  // grant select on <entity_name>
+  const grantMatches = source.matchAll(/grant\s+select\s+on\s+(\S+)/gi);
+  for (const m of grantMatches) {
+    const name = m[1].toUpperCase();
+    if (name !== selfName) {
+      addDep(depMap, name, "DDLS", name, "datasource");
     }
   }
 

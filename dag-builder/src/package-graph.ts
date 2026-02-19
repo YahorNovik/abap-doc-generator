@@ -2,7 +2,7 @@ import { AdtClientWrapper } from "./adt-client";
 import { extractDependencies } from "./abap-parser";
 import { isCustomObject } from "./classifier";
 import { UnionFind } from "./union-find";
-import { PackageObject, PackageGraph, Cluster, DagEdge, DagNode, SubPackageNode, CdsDependency } from "./types";
+import { PackageObject, PackageGraph, Cluster, DagEdge, DagNode, SubPackageNode } from "./types";
 
 const RELEVANT_TYPES = new Set([
   "CLAS", "INTF", "PROG", "FUGR",
@@ -55,7 +55,6 @@ export function buildPackageGraph(
   objects: PackageObject[],
   sources: Map<string, string>,
   errors: string[],
-  cdsDepsMap?: Map<string, CdsDependency[]>,
 ): PackageGraph {
   const objectNames = new Set(objects.map((o) => o.name));
   const internalEdges: DagEdge[] = [];
@@ -67,7 +66,7 @@ export function buildPackageGraph(
 
     let deps;
     try {
-      deps = extractDependencies(source, obj.name, obj.type, cdsDepsMap?.get(obj.name));
+      deps = extractDependencies(source, obj.name, obj.type);
     } catch (err) {
       errors.push(`Failed to parse dependencies for ${obj.name}: ${String(err)}`);
       continue;
@@ -94,6 +93,30 @@ export function buildPackageGraph(
       }
     }
   }
+
+  // Add reverse edges: BDEF implementation class → BDEF
+  // When a BDEF declares "implementation in class ZBP_...", the class implements that BDEF.
+  // Adding the reverse edge ensures they cluster together and the class knows its BDEF.
+  const objectTypeMap = new Map(objects.map((o) => [o.name, o.type]));
+  const reverseEdges: DagEdge[] = [];
+  for (const edge of internalEdges) {
+    if (objectTypeMap.get(edge.from) === "BDEF" && objectTypeMap.get(edge.to) === "CLAS") {
+      // Check this is an implementation class reference (memberType "datasource" from BDEF parser)
+      const isImplClass = edge.references.some((r) => r.memberType === "datasource");
+      if (isImplClass) {
+        // Add reverse: class → BDEF (class implements this behavior definition)
+        const alreadyExists = internalEdges.some((e) => e.from === edge.to && e.to === edge.from);
+        if (!alreadyExists) {
+          reverseEdges.push({
+            from: edge.to,
+            to: edge.from,
+            references: [{ memberName: edge.from, memberType: "datasource" }],
+          });
+        }
+      }
+    }
+  }
+  internalEdges.push(...reverseEdges);
 
   return { objects, internalEdges, externalDependencies };
 }

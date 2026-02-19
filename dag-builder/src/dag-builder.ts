@@ -1,7 +1,7 @@
 import { AdtClientWrapper } from "./adt-client";
 import { extractDependencies } from "./abap-parser";
 import { isCustomObject } from "./classifier";
-import { DagInput, DagResult, DagNode, DagEdge, ParsedDependency, CdsDependency } from "./types";
+import { DagInput, DagResult, DagNode, DagEdge, ParsedDependency } from "./types";
 
 const MAX_NODES = 50;
 
@@ -94,21 +94,10 @@ async function traverse(
       usedBy: [],
     });
 
-    // For DDLS objects, fetch CDS dependencies via ADT endpoint
-    let cdsDeps: CdsDependency[] | undefined;
-    if (current.type === "DDLS") {
-      try {
-        cdsDeps = await client.getCdsDependencies(current.name);
-        log(`  Fetched ${cdsDeps.length} CDS dependencies for ${key}`);
-      } catch (err) {
-        errors.push(`Failed to fetch CDS dependencies for ${current.name}: ${String(err)}`);
-      }
-    }
-
     // Parse dependencies
     let deps: ParsedDependency[];
     try {
-      deps = extractDependencies(source, current.name, current.type as any, cdsDeps);
+      deps = extractDependencies(source, current.name, current.type as any);
     } catch (err) {
       errors.push(`Failed to parse dependencies for ${current.name}: ${String(err)}`);
       continue;

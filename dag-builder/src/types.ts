@@ -260,13 +260,6 @@ export interface PackageDocResult {
   errors: string[];
 }
 
-// ─── CDS dependency types ───
-
-export interface CdsDependency {
-  name: string;
-  type: string; // TABLE, CDS_VIEW, VIEW
-}
-
 // ─── Agent / Tool types ───
 
 export interface ToolDefinition {
