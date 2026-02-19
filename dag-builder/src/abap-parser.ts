@@ -385,7 +385,7 @@ function extractEntityName(node: any): string | undefined {
 
 /**
  * Parses DDLS (CDS view) source using abaplint's CDSParser.
- * Extracts: data sources (FROM), joins, associations, compositions.
+ * Extracts: data sources (FROM), joins, associations, compositions, projections.
  */
 function extractDdlsDependencies(source: string, objectName: string): ParsedDependency[] {
   const depMap = new Map<string, ParsedDependency>();
@@ -396,7 +396,7 @@ function extractDdlsDependencies(source: string, objectName: string): ParsedDepe
   const tree = parser.parse(file);
   if (!tree) return [];
 
-  // Data sources (FROM clause)
+  // Data sources (FROM clause) — works for regular CDS views
   const sources = tree.findAllExpressionsRecursive(CDSExpressions.CDSSource);
   for (const src of sources) {
     const name = extractEntityName(src);
@@ -405,11 +405,19 @@ function extractDdlsDependencies(source: string, objectName: string): ParsedDepe
     }
   }
 
+  // Projection source: "as projection on <entity>"
+  // CDSDefineProjection uses CDSName directly, not CDSSource
+  const projMatch = source.match(/as\s+projection\s+on\s+(\S+)/i);
+  if (projMatch) {
+    const name = projMatch[1].toUpperCase();
+    if (name !== selfName) {
+      addDep(depMap, name, "DDLS", name, "datasource");
+    }
+  }
+
   // Joins
   const joins = tree.findAllExpressionsRecursive(CDSExpressions.CDSJoin);
   for (const join of joins) {
-    // CDSJoin contains CDSSource which we already captured above,
-    // but let's also check for any CDSSource children specifically
     const joinSources = join.findAllExpressionsRecursive(CDSExpressions.CDSSource);
     for (const src of joinSources) {
       const name = extractEntityName(src);
@@ -426,7 +434,6 @@ function extractDdlsDependencies(source: string, objectName: string): ParsedDepe
     if (relation) {
       const name = extractEntityName(relation);
       if (name && name !== selfName) {
-        // Try to get alias
         const alias = relation.findDirectExpression?.(CDSExpressions.CDSAs);
         const aliasName = alias ? alias.concatTokens().replace(/^AS\s+/i, "").trim() : name;
         addDep(depMap, name, "DDLS", aliasName, "association");
@@ -443,6 +450,16 @@ function extractDdlsDependencies(source: string, objectName: string): ParsedDepe
       if (name && name !== selfName) {
         addDep(depMap, name, "DDLS", name, "association");
       }
+    }
+  }
+
+  // Redirected compositions in projections: "redirected to composition child/parent <entity>"
+  // These appear inside CDSElement nodes, not CDSComposition
+  const redirectMatches = source.matchAll(/redirected\s+to\s+(?:composition\s+child|parent)\s+(\S+)/gi);
+  for (const m of redirectMatches) {
+    const name = m[1].toUpperCase();
+    if (name !== selfName) {
+      addDep(depMap, name, "DDLS", name, "association");
     }
   }
 

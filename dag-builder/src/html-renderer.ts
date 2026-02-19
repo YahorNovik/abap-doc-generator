@@ -202,8 +202,12 @@ function buildMermaidDiagram(
     if (!objectMap.has(edge.from) || !objectMap.has(edge.to)) continue;
     const fromId = mermaidId(edge.from);
     const toId = mermaidId(edge.to);
-    const refs = edge.references.slice(0, 3).map((r) => r.memberName);
-    if (edge.references.length > 3) refs.push("...");
+    // Use member name as label, but skip if it duplicates the target node name
+    const refs = edge.references
+      .filter((r) => r.memberName.toUpperCase() !== edge.to.toUpperCase())
+      .slice(0, 3)
+      .map((r) => r.memberName);
+    if (edge.references.length > 3 && refs.length >= 3) refs.push("...");
     const label = refs.length > 0 ? `|"${refs.join(", ")}"|` : "";
     lines.push(`  ${fromId} -->${label} ${toId}`);
   }

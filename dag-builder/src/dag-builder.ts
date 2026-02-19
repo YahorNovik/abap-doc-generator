@@ -198,6 +198,19 @@ async function resolveType(
  * Uses objectUri (from package contents) for direct access — no search needed.
  * Works for all types: CLAS/PROG return ABAP source, TABL/VIEW/DTEL return XML definition.
  */
+/** Composite key for source storage: distinguishes same-name objects of different types (e.g. DDLS + BDEF). */
+export function sourceKey(name: string, type: string): string {
+  return `${name}\0${type}`;
+}
+
+/**
+ * Fetches source/definition for a list of objects via ADT.
+ * Uses objectUri (from package contents) for direct access — no search needed.
+ * Works for all types: CLAS/PROG return ABAP source, TABL/VIEW/DTEL return XML definition.
+ *
+ * Keys in returned Map use composite format (name\0type) to handle same-name objects
+ * of different types (e.g. DDLS and BDEF both named ZAG_I_REQUEST_H).
+ */
 export async function fetchSourceForNodes(
   client: AdtClientWrapper,
   nodes: Array<{ name: string; type: string; uri?: string }>,
@@ -210,13 +223,13 @@ export async function fetchSourceForNodes(
     const results = await Promise.allSettled(
       batch.map(async (node) => {
         const source = await client.fetchSource(node.name, node.uri);
-        return { name: node.name, source };
+        return { name: node.name, type: node.type, source };
       }),
     );
     for (let j = 0; j < results.length; j++) {
       const result = results[j];
       if (result.status === "fulfilled") {
-        sources.set(result.value.name, result.value.source);
+        sources.set(sourceKey(result.value.name, result.value.type), result.value.source);
       } else {
         errors.push(`Failed to fetch source for ${batch[j].name}: ${String(result.reason)}`);
       }

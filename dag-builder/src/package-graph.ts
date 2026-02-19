@@ -3,6 +3,7 @@ import { extractDependencies } from "./abap-parser";
 import { isCustomObject } from "./classifier";
 import { UnionFind } from "./union-find";
 import { PackageObject, PackageGraph, Cluster, DagEdge, DagNode, SubPackageNode } from "./types";
+import { sourceKey } from "./dag-builder";
 
 const RELEVANT_TYPES = new Set([
   "CLAS", "INTF", "PROG", "FUGR",
@@ -56,26 +57,39 @@ export function buildPackageGraph(
   sources: Map<string, string>,
   errors: string[],
 ): PackageGraph {
+  // Build lookup structures that handle same-name objects of different types
+  // (e.g. DDLS and BDEF both named ZAG_I_REQUEST_H)
   const objectNames = new Set(objects.map((o) => o.name));
+  // Map from name → set of types present in the package (for same-name disambiguation)
+  const nameToTypes = new Map<string, Set<string>>();
+  for (const obj of objects) {
+    if (!nameToTypes.has(obj.name)) nameToTypes.set(obj.name, new Set());
+    nameToTypes.get(obj.name)!.add(obj.type);
+  }
+
   const internalEdges: DagEdge[] = [];
   const externalDependencies: PackageGraph["externalDependencies"] = [];
 
   for (const obj of objects) {
-    const source = sources.get(obj.name);
+    // Look up source using composite key (handles same-name DDLS+BDEF)
+    const source = sources.get(sourceKey(obj.name, obj.type));
     if (!source) continue;
 
     let deps;
     try {
       deps = extractDependencies(source, obj.name, obj.type);
     } catch (err) {
-      errors.push(`Failed to parse dependencies for ${obj.name}: ${String(err)}`);
+      errors.push(`Failed to parse dependencies for ${obj.name} (${obj.type}): ${String(err)}`);
       continue;
     }
 
     for (const dep of deps) {
       const depName = dep.objectName.toUpperCase();
       if (depName.includes("~")) continue;
-      if (depName === obj.name) continue;
+
+      // Skip self-reference: same name AND same type
+      // (allows BDEF ZAG_I_REQUEST_H → DDLS ZAG_I_REQUEST_H)
+      if (depName === obj.name && dep.objectType === obj.type) continue;
 
       if (objectNames.has(depName)) {
         internalEdges.push({
@@ -97,20 +111,30 @@ export function buildPackageGraph(
   // Add reverse edges: BDEF implementation class → BDEF
   // When a BDEF declares "implementation in class ZBP_...", the class implements that BDEF.
   // Adding the reverse edge ensures they cluster together and the class knows its BDEF.
-  const objectTypeMap = new Map(objects.map((o) => [o.name, o.type]));
+  const objectTypeMap = new Map<string, string>();
+  for (const o of objects) {
+    // For same-name objects, store with composite key; for unique names, store plain
+    if ((nameToTypes.get(o.name)?.size ?? 0) > 1) {
+      objectTypeMap.set(`${o.name}\0${o.type}`, o.type);
+    }
+    // Always store by name (last one wins, but we check edges specifically)
+    objectTypeMap.set(o.name, o.type);
+  }
+
   const reverseEdges: DagEdge[] = [];
   for (const edge of internalEdges) {
-    if (objectTypeMap.get(edge.from) === "BDEF" && objectTypeMap.get(edge.to) === "CLAS") {
-      // Check this is an implementation class reference (memberType "datasource" from BDEF parser)
+    // Find the type of the 'from' object — could be ambiguous if same name
+    const fromObj = objects.find((o) => o.name === edge.from && o.type === "BDEF");
+    const toObj = objects.find((o) => o.name === edge.to && o.type === "CLAS");
+    if (fromObj && toObj) {
       const isImplClass = edge.references.some((r) => r.memberType === "datasource");
       if (isImplClass) {
-        // Add reverse: class → BDEF (class implements this behavior definition)
         const alreadyExists = internalEdges.some((e) => e.from === edge.to && e.to === edge.from);
         if (!alreadyExists) {
           reverseEdges.push({
             from: edge.to,
             to: edge.from,
-            references: [{ memberName: edge.from, memberType: "datasource" }],
+            references: [{ memberName: "implements", memberType: "datasource" }],
           });
         }
       }

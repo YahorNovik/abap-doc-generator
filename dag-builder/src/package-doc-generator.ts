@@ -1,4 +1,4 @@
-import { createConnectedClient, fetchSourceForNodes } from "./dag-builder";
+import { createConnectedClient, fetchSourceForNodes, sourceKey } from "./dag-builder";
 import { AdtClientWrapper } from "./adt-client";
 import { fetchPackageObjects, buildPackageGraph, detectClusters, discoverPackageTree, flattenPackageTree } from "./package-graph";
 import { callLlm, callLlmAgentLoop } from "./llm-client";
@@ -165,7 +165,7 @@ async function processPackageObjects(
           if (excludedSet?.has(name)) continue;
           const obj = objectMap.get(name);
           if (!obj) continue;
-          const source = sources.get(name);
+          const source = sources.get(sourceKey(name, obj.type));
           const edges = edgesByFrom.get(name) ?? [];
           const depSums = edges.filter((e) => summaries[e.to]).map((e) => ({ name: e.to, summary: summaries[e.to] }));
           const dagNode: DagNode = {
@@ -219,9 +219,9 @@ async function processPackageObjects(
       log(`  Triage (user override): ${triageSet.size}/${triageCandidates.length} objects selected for full documentation.`);
     } else if (triageCandidates.length > 1) {
       const triageInput = triageCandidates
-        .filter((o) => sources.has(o.name))
+        .filter((o) => sources.has(sourceKey(o.name, o.type)))
         .map((o) => {
-          const srcLines = (sources.get(o.name) ?? "").split("\n").length;
+          const srcLines = (sources.get(sourceKey(o.name, o.type)) ?? "").split("\n").length;
           const depCount = (edgesByFrom.get(o.name) ?? []).length;
           const usedByCount = cluster.internalEdges.filter((e) => e.to === o.name).length;
           return { name: o.name, type: o.type, summary: summaries[o.name] || o.description || "", sourceLines: srcLines, depCount, usedByCount };
@@ -243,7 +243,7 @@ async function processPackageObjects(
 
     // Collect triage metadata (for triage-only mode or always — cheap to compute)
     for (const obj of triageCandidates) {
-      const srcLines = sources.has(obj.name) ? (sources.get(obj.name) ?? "").split("\n").length : 0;
+      const srcLines = sources.has(sourceKey(obj.name, obj.type)) ? (sources.get(sourceKey(obj.name, obj.type)) ?? "").split("\n").length : 0;
       const depCount = (edgesByFrom.get(obj.name) ?? []).length;
       const usedByCount = cluster.internalEdges.filter((e) => e.to === obj.name).length;
       triageMetadata.push({
@@ -279,7 +279,7 @@ async function processPackageObjects(
         const batch = docCandidates.slice(di, di + DOC_CONCURRENCY);
         const docResults = await Promise.allSettled(
           batch.map(async (obj) => {
-            const source = sources.get(obj.name);
+            const source = sources.get(sourceKey(obj.name, obj.type));
             const effectiveSource = source || `* ${obj.type} object: ${obj.name}\n* Description: ${obj.description || "No description available"}`;
 
             const dagNode: DagNode = {
