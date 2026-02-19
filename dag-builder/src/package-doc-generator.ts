@@ -115,9 +115,31 @@ async function processPackageObjects(
   const sources = await fetchSourceForNodes(client, objects, errors);
   log(`[${packageLabel}] Fetched source for ${sources.size}/${objects.length} objects.`);
 
+  // Fetch CDS dependencies for DDLS objects via ADT endpoint
+  const ddlsObjects = objects.filter((o) => o.type === "DDLS");
+  const cdsDepsMap = new Map<string, import("./types").CdsDependency[]>();
+  if (ddlsObjects.length > 0) {
+    log(`[${packageLabel}] Fetching CDS dependencies for ${ddlsObjects.length} DDLS object(s)...`);
+    const cdsResults = await Promise.allSettled(
+      ddlsObjects.map(async (obj) => {
+        const deps = await client.getCdsDependencies(obj.name);
+        return { name: obj.name, deps };
+      }),
+    );
+    for (let i = 0; i < cdsResults.length; i++) {
+      const result = cdsResults[i];
+      if (result.status === "fulfilled") {
+        cdsDepsMap.set(result.value.name, result.value.deps);
+      } else {
+        errors.push(`Failed to fetch CDS dependencies for ${ddlsObjects[i].name}: ${String(result.reason)}`);
+      }
+    }
+    log(`[${packageLabel}] Fetched CDS dependencies for ${cdsDepsMap.size}/${ddlsObjects.length} DDLS object(s).`);
+  }
+
   // Build package-internal graph
   log(`[${packageLabel}] Building dependency graph...`);
-  const graph = buildPackageGraph(objects, sources, errors);
+  const graph = buildPackageGraph(objects, sources, errors, cdsDepsMap);
   log(`[${packageLabel}] Internal edges: ${graph.internalEdges.length}, External deps: ${graph.externalDependencies.length}`);
 
   // Detect clusters via Union-Find (or use precomputed assignments)

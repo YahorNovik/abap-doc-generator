@@ -9,7 +9,7 @@ import {
   Statements,
   Expressions,
 } from "@abaplint/core";
-import { ParsedDependency, MemberReference } from "./types";
+import { ParsedDependency, MemberReference, CdsDependency } from "./types";
 import { buildAbapGitFilename } from "./classifier";
 
 interface ScopeNode {
@@ -33,15 +33,28 @@ const ABAPLINT_CONFIG = JSON.stringify({
   rules: {},
 });
 
+const CDS_TYPES = new Set(["DDLS", "DDLX", "BDEF", "SRVD", "DCLS"]);
+
 /**
  * Parses ABAP source code using abaplint and extracts external object dependencies
  * with member-level reference information.
+ * For CDS-family objects (DDLS, DDLX, BDEF, SRVD, DCLS), uses pre-fetched ADT
+ * CDS dependencies instead of abaplint parsing.
  */
 export function extractDependencies(
   source: string,
   objectName: string,
-  objectType: string
+  objectType: string,
+  cdsDependencies?: CdsDependency[],
 ): ParsedDependency[] {
+  // CDS-family objects: use ADT-provided dependencies instead of abaplint
+  if (CDS_TYPES.has(objectType) && cdsDependencies) {
+    return convertCdsDependencies(cdsDependencies, objectName);
+  }
+  // CDS objects without ADT deps: skip abaplint (it can't parse DDL)
+  if (CDS_TYPES.has(objectType)) {
+    return [];
+  }
   const filename = buildAbapGitFilename(objectName, objectType);
   const file = new MemoryFile(filename, source);
 
@@ -303,4 +316,49 @@ function mapOoType(ooType: string): string {
     default:
       return "UNKNOWN";
   }
+}
+
+// ─── CDS dependency conversion ───
+
+/** Maps ADT CDS dependency node types to ABAP object types. */
+function mapCdsNodeType(nodeType: string): string {
+  switch (nodeType) {
+    case "TABLE":
+      return "TABL";
+    case "CDS_VIEW":
+    case "CDS_DB_VIEW":
+      return "DDLS";
+    case "VIEW":
+      return "VIEW";
+    default:
+      return "TABL"; // conservative fallback
+  }
+}
+
+/**
+ * Converts pre-fetched CDS dependencies (from ADT endpoint) to ParsedDependency format.
+ */
+function convertCdsDependencies(
+  cdsDeps: CdsDependency[],
+  selfName: string,
+): ParsedDependency[] {
+  const depMap = new Map<string, ParsedDependency>();
+
+  for (const dep of cdsDeps) {
+    const key = dep.name.toUpperCase();
+    if (key === selfName.toUpperCase()) continue;
+
+    if (!depMap.has(key)) {
+      depMap.set(key, {
+        objectName: key,
+        objectType: mapCdsNodeType(dep.type),
+        members: [{
+          memberName: key,
+          memberType: "datasource",
+        }],
+      });
+    }
+  }
+
+  return Array.from(depMap.values());
 }

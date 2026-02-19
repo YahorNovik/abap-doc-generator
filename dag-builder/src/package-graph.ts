@@ -2,7 +2,7 @@ import { AdtClientWrapper } from "./adt-client";
 import { extractDependencies } from "./abap-parser";
 import { isCustomObject } from "./classifier";
 import { UnionFind } from "./union-find";
-import { PackageObject, PackageGraph, Cluster, DagEdge, DagNode, SubPackageNode } from "./types";
+import { PackageObject, PackageGraph, Cluster, DagEdge, DagNode, SubPackageNode, CdsDependency } from "./types";
 
 const RELEVANT_TYPES = new Set([
   "CLAS", "INTF", "PROG", "FUGR",
@@ -55,6 +55,7 @@ export function buildPackageGraph(
   objects: PackageObject[],
   sources: Map<string, string>,
   errors: string[],
+  cdsDepsMap?: Map<string, CdsDependency[]>,
 ): PackageGraph {
   const objectNames = new Set(objects.map((o) => o.name));
   const internalEdges: DagEdge[] = [];
@@ -66,7 +67,7 @@ export function buildPackageGraph(
 
     let deps;
     try {
-      deps = extractDependencies(source, obj.name, obj.type);
+      deps = extractDependencies(source, obj.name, obj.type, cdsDepsMap?.get(obj.name));
     } catch (err) {
       errors.push(`Failed to parse dependencies for ${obj.name}: ${String(err)}`);
       continue;

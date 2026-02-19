@@ -17,7 +17,7 @@ export interface DagNode {
 
 export interface MemberReference {
   memberName: string;
-  memberType: "method" | "attribute" | "type" | "constant" | "event" | "constructor" | "form" | "unknown";
+  memberType: "method" | "attribute" | "type" | "constant" | "event" | "constructor" | "form" | "unknown" | "datasource" | "association";
   line?: number;
 }
 
@@ -258,6 +258,13 @@ export interface PackageDocResult {
     totalTokens: number;
   };
   errors: string[];
+}
+
+// ─── CDS dependency types ───
+
+export interface CdsDependency {
+  name: string;
+  type: string; // TABLE, CDS_VIEW, VIEW
 }
 
 // ─── Agent / Tool types ───
